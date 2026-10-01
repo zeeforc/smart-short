@@ -16,7 +16,7 @@ class SmartDefecta extends Page implements HasForms
 {
     use InteractsWithForms;
 
-    protected static ?string $navigationIcon = Heroicon::OutlinedShoppingCart;
+    protected static \BackedEnum|string|null $navigationIcon = Heroicon::OutlinedShoppingCart;
 
     protected static ?string $navigationLabel = 'Smart Defecta (PO)';
 
