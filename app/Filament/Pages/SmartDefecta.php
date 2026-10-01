@@ -61,7 +61,7 @@ class SmartDefecta extends Page implements HasForms
                         ->required(),
                 ])
                 ->action(function (array $data) {
-                    $filePath = storage_path('app/' . $data['file']);
+                    $filePath = \Illuminate\Support\Facades\Storage::disk('local')->path($data['file']);
                     
                     $import = new \App\Imports\SmartDefectaImport();
                     \Maatwebsite\Excel\Facades\Excel::import($import, $filePath);
