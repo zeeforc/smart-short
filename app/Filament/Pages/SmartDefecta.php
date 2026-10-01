@@ -52,9 +52,9 @@ class SmartDefecta extends Page implements HasForms
         $this->form->fill();
     }
 
-    public function form(Form $form): Form
+    public function form(\Filament\Schemas\Schema $schema): \Filament\Schemas\Schema
     {
-        return $form
+        return $schema
             ->schema([
                 Repeater::make('items')
                     ->label('Daftar Belanja (Defecta)')
