@@ -2,19 +2,28 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\DefectaItem;
 use App\Services\OrderCalculationService;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\TextInput;
-use Filament\Forms\Concerns\InteractsWithForms;
-use Filament\Forms\Contracts\HasForms;
-use Filament\Forms\Form;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Table;
+use Filament\Tables\Actions\CreateAction;
+use Filament\Tables\Actions\DeleteAction;
+use Filament\Tables\Actions\Action as TableAction;
+use Filament\Tables\Actions\BulkAction;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 
-class SmartDefecta extends Page implements HasForms
+class SmartDefecta extends Page implements HasTable
 {
-    use InteractsWithForms;
+    use InteractsWithTable;
 
     public static function getNavigationIcon(): string|\BackedEnum|null
     {
@@ -24,11 +33,6 @@ class SmartDefecta extends Page implements HasForms
     public static function getNavigationLabel(): string
     {
         return 'Smart Defecta (PO)';
-    }
-
-    public function getTitle(): string
-    {
-        return 'Keranjang Belanja Pintar';
     }
 
     public static function getNavigationGroup(): ?string
@@ -41,15 +45,24 @@ class SmartDefecta extends Page implements HasForms
         return 1;
     }
 
+    protected string $view = 'filament.pages.smart-defecta';
+
+    public ?array $calculationResults = null;
+
+    public function getTitle(): string
+    {
+        return 'Keranjang Belanja Pintar';
+    }
+
     protected function getHeaderActions(): array
     {
         return [
-            \Filament\Actions\Action::make('import_excel')
+            Action::make('import_excel')
                 ->label('Upload File Excel')
                 ->icon('heroicon-m-arrow-up-tray')
                 ->color('success')
                 ->form([
-                    \Filament\Forms\Components\FileUpload::make('file')
+                    FileUpload::make('file')
                         ->label('File Excel')
                         ->disk('local')
                         ->directory('imports')
@@ -61,28 +74,24 @@ class SmartDefecta extends Page implements HasForms
                         ->required(),
                 ])
                 ->action(function (array $data) {
-                    $filePath = \Illuminate\Support\Facades\Storage::disk('local')->path($data['file']);
+                    $filePath = Storage::disk('local')->path($data['file']);
                     
                     $import = new \App\Imports\SmartDefectaImport();
-                    \Maatwebsite\Excel\Facades\Excel::import($import, $filePath);
+                    Excel::import($import, $filePath);
 
                     $validItems = collect($import->data)->filter(function ($item) {
                         return !empty($item['product_name']);
                     })->values()->toArray();
 
                     if (count($validItems) > 0) {
-                        // In Livewire/Filament, updating the state directly works well if we call fill() or just update the property
-                        // The items repeater state is mapped to $this->items (since statePath is 'items')
-                        // We also might want to clear the old items or append. Let's replace for now.
-                        
-                        // We should format it the way Repeater expects (UUID keys)
-                        $repeaterData = [];
+                        // Persist to DB for the current user
                         foreach ($validItems as $item) {
-                            $repeaterData[\Illuminate\Support\Str::uuid()->toString()] = $item;
+                            DefectaItem::create([
+                                'user_id' => auth()->id(),
+                                'product_name' => $item['product_name'],
+                                'qty' => $item['qty'] ?: 1,
+                            ]);
                         }
-                        
-                        $this->items = $repeaterData;
-                        $this->form->fill(['items' => $repeaterData]);
 
                         \Filament\Notifications\Notification::make()
                             ->title('Berhasil import ' . count($validItems) . ' obat dari Excel')
@@ -95,84 +104,105 @@ class SmartDefecta extends Page implements HasForms
                             ->send();
                     }
                 }),
+                
+            Action::make('clear_cart')
+                ->label('Kosongkan Daftar')
+                ->icon('heroicon-m-trash')
+                ->color('danger')
+                ->requiresConfirmation()
+                ->action(function () {
+                    DefectaItem::where('user_id', auth()->id())->delete();
+                    $this->calculationResults = null;
+                    \Filament\Notifications\Notification::make()
+                        ->title('Daftar belanja berhasil dikosongkan')
+                        ->success()
+                        ->send();
+                }),
         ];
     }
 
-    protected string $view = 'filament.pages.smart-defecta';
-
-    public ?array $items = [];
-
-    public ?array $calculationResults = null;
-
-    public function mount(): void
+    public function table(Table $table): Table
     {
-        $this->form->fill();
-    }
-
-    public function form(\Filament\Schemas\Schema $schema): \Filament\Schemas\Schema
-    {
-        return $schema
-            ->schema([
-                Repeater::make('items')
-                    ->label('Daftar Belanja (Defecta)')
-                    ->schema([
+        return $table
+            ->query(DefectaItem::query()->where('user_id', auth()->id()))
+            ->columns([
+                TextColumn::make('product_name')
+                    ->label('Nama Obat')
+                    ->searchable(),
+                TextColumn::make('qty')
+                    ->label('Jumlah (QTY)')
+                    ->numeric(),
+            ])
+            ->headerActions([
+                CreateAction::make()
+                    ->label('Tambah Obat Manual')
+                    ->icon('heroicon-m-plus')
+                    ->mutateFormDataUsing(function (array $data): array {
+                        $data['user_id'] = auth()->id();
+                        return $data;
+                    })
+                    ->form([
                         TextInput::make('product_name')
                             ->label('Nama Obat')
-                            ->required()
-                            ->placeholder('Contoh: Paracetamol 500mg'),
+                            ->required(),
                         TextInput::make('qty')
                             ->label('Jumlah (QTY)')
                             ->numeric()
-                            ->required()
-                            ->minValue(1)
-                            ->default(1),
-                    ])
-                    ->columns(2)
-                    ->addActionLabel('Tambah Obat Baru')
-                    ->defaultItems(1),
+                            ->default(1)
+                            ->required(),
+                    ]),
+                TableAction::make('kalkulasi')
+                    ->label('Kalkulasi Pemenang')
+                    ->icon('heroicon-m-calculator')
+                    ->color('primary')
+                    ->action(fn () => $this->calculate()),
             ])
-            ->statePath('items'); // Because we mapped state to $items
+            ->actions([
+                DeleteAction::make(),
+            ])
+            ->bulkActions([
+                \Filament\Tables\Actions\BulkActionGroup::make([
+                    \Filament\Tables\Actions\DeleteBulkAction::make(),
+                ]),
+            ])
+            ->emptyStateHeading('Keranjang masih kosong')
+            ->emptyStateDescription('Silakan upload file Excel atau tambah obat secara manual.');
     }
 
-    protected function getFormActions(): array
+    public function calculate()
     {
-        return [
-            Action::make('calculate')
-                ->label('Kalkulasi Pemenang')
-                ->submit('calculate')
-                ->color('primary')
-                ->icon('heroicon-m-calculator'),
-        ];
-    }
+        $items = DefectaItem::where('user_id', auth()->id())->get();
+        
+        if ($items->isEmpty()) {
+            \Filament\Notifications\Notification::make()
+                ->title('Keranjang belanja kosong')
+                ->warning()
+                ->send();
+            return;
+        }
 
-    public function calculate(OrderCalculationService $service)
-    {
-        $state = $this->form->getState();
-        $items = $state['items'] ?? []; // This gets the array inside the repeater, wait state mapping is a bit different. Let's see.
-        // If statePath is 'items', the entire form state is stored in $this->items.
-        // So $state is the array of repeater items if we only have one root component, but wait, usually we put Repeater inside a schema.
-        // Actually, if statePath is 'items', it maps the form data to the $items array.
-        // A safer way is to use $data array for statePath.
-
+        $service = app(OrderCalculationService::class);
         $results = [];
 
         foreach ($items as $item) {
-            // Need to parse the product name to canonical to find it
-            // OrderCalculationService expects normalizedName. Let's use the exact name for now or parse it.
-            // We should inject ProductNormalizationService or just parse it here.
-            $normalizedName = strtoupper(trim($item['product_name']));
-
-            // For simplicity, let's just pass the typed name and let service handle or we assume user types exactly.
-            // In reality, we should provide a Select with search for normalized_name. I will leave it as text for now.
-            $calc = $service->calculateBestSupplier($normalizedName, (int) $item['qty']);
+            $normalizedName = strtoupper(trim($item->product_name));
+            $calc = $service->calculateBestSupplier($normalizedName, (int) $item->qty);
 
             $results[] = [
-                'request' => $item,
+                'request' => [
+                    'product_name' => $item->product_name,
+                    'qty' => $item->qty,
+                ],
                 'calculation' => $calc,
             ];
         }
 
         $this->calculationResults = $results;
+        
+        \Filament\Notifications\Notification::make()
+            ->title('Kalkulasi berhasil')
+            ->success()
+            ->send();
     }
 
     public function exportToExcel()
@@ -185,7 +215,7 @@ class SmartDefecta extends Page implements HasForms
             return;
         }
 
-        return \Maatwebsite\Excel\Facades\Excel::download(
+        return Excel::download(
             new \App\Exports\SmartDefectaExport($this->calculationResults),
             'SP_Defecta_' . date('Ymd_His') . '.xlsx'
         );
