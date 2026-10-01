@@ -13,10 +13,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Filament\Tables\Actions\CreateAction;
-use Filament\Tables\Actions\DeleteAction;
 use Filament\Tables\Actions\Action as TableAction;
-use Filament\Tables\Actions\BulkAction;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
@@ -84,7 +81,6 @@ class SmartDefecta extends Page implements HasTable
                     })->values()->toArray();
 
                     if (count($validItems) > 0) {
-                        // Persist to DB for the current user
                         foreach ($validItems as $item) {
                             DefectaItem::create([
                                 'user_id' => auth()->id(),
@@ -134,13 +130,9 @@ class SmartDefecta extends Page implements HasTable
                     ->numeric(),
             ])
             ->headerActions([
-                CreateAction::make()
+                TableAction::make('create')
                     ->label('Tambah Obat Manual')
                     ->icon('heroicon-m-plus')
-                    ->mutateFormDataUsing(function (array $data): array {
-                        $data['user_id'] = auth()->id();
-                        return $data;
-                    })
                     ->form([
                         TextInput::make('product_name')
                             ->label('Nama Obat')
@@ -150,7 +142,14 @@ class SmartDefecta extends Page implements HasTable
                             ->numeric()
                             ->default(1)
                             ->required(),
-                    ]),
+                    ])
+                    ->action(function (array $data) {
+                        DefectaItem::create([
+                            'user_id' => auth()->id(),
+                            'product_name' => $data['product_name'],
+                            'qty' => $data['qty'],
+                        ]);
+                    }),
                 TableAction::make('kalkulasi')
                     ->label('Kalkulasi Pemenang')
                     ->icon('heroicon-m-calculator')
@@ -158,11 +157,20 @@ class SmartDefecta extends Page implements HasTable
                     ->action(fn () => $this->calculate()),
             ])
             ->actions([
-                DeleteAction::make(),
+                TableAction::make('delete')
+                    ->icon('heroicon-m-trash')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->action(fn ($record) => $record->delete()),
             ])
             ->bulkActions([
                 \Filament\Tables\Actions\BulkActionGroup::make([
-                    \Filament\Tables\Actions\DeleteBulkAction::make(),
+                    \Filament\Tables\Actions\BulkAction::make('delete')
+                        ->label('Delete')
+                        ->icon('heroicon-m-trash')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->action(fn (\Illuminate\Database\Eloquent\Collection $records) => $records->each->delete()),
                 ]),
             ])
             ->emptyStateHeading('Keranjang masih kosong')
