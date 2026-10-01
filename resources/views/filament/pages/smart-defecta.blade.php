@@ -11,7 +11,12 @@
 
     @if($calculationResults !== null)
         <div class="mt-8 space-y-4">
-            <h2 class="text-xl font-bold">Hasil Rekomendasi (Termasuk Diskon & PPN)</h2>
+            <div class="flex items-center justify-between">
+                <h2 class="text-xl font-bold">Hasil Rekomendasi (Termasuk Diskon & PPN)</h2>
+                <x-filament::button wire:click="exportToExcel" color="success" icon="heroicon-m-arrow-down-tray">
+                    Download Surat Pesanan (Excel)
+                </x-filament::button>
+            </div>
             
             @foreach($calculationResults as $res)
                 <x-filament::section>

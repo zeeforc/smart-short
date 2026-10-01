@@ -174,4 +174,20 @@ class SmartDefecta extends Page implements HasForms
 
         $this->calculationResults = $results;
     }
+
+    public function exportToExcel()
+    {
+        if (empty($this->calculationResults)) {
+            \Filament\Notifications\Notification::make()
+                ->title('Belum ada hasil kalkulasi yang bisa di-download')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        return \Maatwebsite\Excel\Facades\Excel::download(
+            new \App\Exports\SmartDefectaExport($this->calculationResults),
+            'SP_Defecta_' . date('Ymd_His') . '.xlsx'
+        );
+    }
 }
