@@ -31,26 +31,61 @@ class ProductNormalizationService
     /**
      * Parse nama obat mentah menjadi komponen terstruktur (Canonical Key)
      */
-    public function parseDrugName(string $rawName, string $rawUnit)
+    public function parseDrugName(string $rawName, string $rawUnit): array
     {
-        $s = mb_strtolower(trim(preg_replace('/\s+/', ' ', $rawName)));
-        $s = str_replace(',', '.', $s); // 12,5 -> 12.5
+        $s = mb_strtolower(trim($rawName));
 
-        // kekuatan: "500 mg", "5%", "100 mg/5 ml", "1000 iu", "0.1%"
-        preg_match('/(\d+(?:\.\d+)?)\s*(mg|mcg|g|iu|%)(?:\s*\/\s*(\d+(?:\.\d+)?)\s*(ml))?/', $s, $m);
+        // Hapus simbol bullet / minus di awal seperti "- CENDO", "* PARACETAMOL"
+        $s = preg_replace('/^[-\*\•\.\s]+/', '', $s);
+
+        // Standarisasi angka desimal koma ke titik (12,5 -> 12.5)
+        $s = preg_replace('/(\d+),(\d+)/', '$1.$2', $s);
+        $s = trim(preg_replace('/\s+/', ' ', $s));
+
+        // Bersihkan tanda kurung kemasan spt (besar), (kecil), (box), (strip), (nr)
+        $s = trim(preg_replace('/\([^)]*\)/', '', $s));
+
+        // Ekstrak kekuatan/volume dosis: "500 mg", "5%", "100 mg/5 ml", "15 ml", "5 ml", "0.6 ml"
+        preg_match('/(\d+(?:\.\d+)?)\s*(mg|mcg|g|iu|%|ml|l)(?:\s*\/\s*(\d+(?:\.\d+)?)\s*(ml|l))?/i', $s, $m);
 
         $strength = null;
         if ($m) {
             $value = rtrim(rtrim(number_format((float) $m[1], 3, '.', ''), '0'), '.');
-            $strength = $value.$m[2].(isset($m[4]) ? "/{$m[3]}{$m[4]}" : '');
+            $unit1 = strtolower($m[2]);
+            $sub = '';
+            if (isset($m[4])) {
+                $subVal = rtrim(rtrim(number_format((float) $m[3], 3, '.', ''), '0'), '.');
+                $sub = "/{$subVal}".strtolower($m[4]);
+            }
+            $strength = $value.$unit1.$sub;
+
+            // Hapus bagian kekuatan dari nama obat
+            $s = str_replace($m[0], ' ', $s);
         }
 
-        // Hapus keterangan kekuatan dari nama
-        $name = trim(preg_replace('/\s+/', ' ', $m ? str_replace($m[0], '', $s) : $s));
+        // Bersihkan kata-kata penanda kemasan / bentuk yang sering nempel di nama produk
+        $noiseWords = [
+            '/\b(e\.d|ed|tm|tt|tetes mata|tetes telinga)\b/i',
+            '/\b(no\s*retur|noret|no\s*return|nr)\b/i',
+            '/\b(strip|blister|box|botol|btl|fls|tube|pot|vial|amp)\b/i',
+            '/\b(10x10|10\s*x\s*10|5x10|3x10|30x10|50x10)\b/i',
+        ];
+        foreach ($noiseWords as $pattern) {
+            $s = preg_replace($pattern, ' ', $s);
+        }
 
-        // Bersihkan tanda kurung kemasan spt (box), (strip)
-        $name = trim(preg_replace('/\([^)]+\)/', '', $name));
+        // Hapus pemisah tanda hubung atau garis miring yang tersisa
+        $s = preg_replace('/[-\/]/', ' ', $s);
+        $s = trim(preg_replace('/\s+/', ' ', $s));
 
+        // Hapus duplikasi nama brand/pabrik di akhir (misal: "cendo catarlent cendo")
+        $words = explode(' ', $s);
+        if (count($words) >= 3 && $words[0] === $words[count($words) - 1]) {
+            array_pop($words);
+            $s = implode(' ', $words);
+        }
+
+        $name = trim(preg_replace('/\s+/', ' ', $s));
         $form = mb_strtolower(trim($rawUnit));
 
         return [

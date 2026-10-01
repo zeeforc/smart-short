@@ -124,20 +124,63 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
     }
 
     /**
-     * Bersihkan format uang/angka (misal: "Rp 15.000,00" jadi "15000")
+     * Bersihkan format uang/angka (misal: "Rp 15.000,00", "10,500", "35,963.00")
      */
-    private function cleanNumber($value)
+    private function cleanNumber($value): float
     {
         if (empty($value)) {
-            return 0;
+            return 0.0;
         }
 
-        // Hapus "Rp", spasi, dan karakter non-angka selain koma/titik
-        $clean = preg_replace('/[^\d.,]/', '', strval($value));
+        $clean = trim((string) $value);
+        $clean = preg_replace('/[^\d.,]/', '', $clean);
 
-        // Asumsi format Indonesia: hapus titik ribuan, ubah koma desimal jadi titik
-        $clean = str_replace('.', '', $clean);
-        $clean = str_replace(',', '.', $clean);
+        if ($clean === '') {
+            return 0.0;
+        }
+
+        $hasDot = str_contains($clean, '.');
+        $hasComma = str_contains($clean, ',');
+
+        if ($hasDot && $hasComma) {
+            $lastDot = strrpos($clean, '.');
+            $lastComma = strrpos($clean, ',');
+            if ($lastDot > $lastComma) {
+                // US standard: 12,000.50 -> strip comma
+                $clean = str_replace(',', '', $clean);
+            } else {
+                // ID standard: 12.000,50 -> strip dot, comma to dot
+                $clean = str_replace('.', '', $clean);
+                $clean = str_replace(',', '.', $clean);
+            }
+
+            return (float) $clean;
+        }
+
+        if ($hasComma) {
+            // Check if comma is thousand separator (e.g. 10,500 or 1,250,000)
+            if (preg_match('/,(\d{3})(?:$|,)/', $clean)) {
+                $clean = str_replace(',', '', $clean);
+            } else {
+                $clean = str_replace(',', '.', $clean);
+            }
+
+            return (float) $clean;
+        }
+
+        if ($hasDot) {
+            // Check if dot is decimal (e.g. 23310.00 or 150.50)
+            if (preg_match('/\.\d{2}$/', $clean)) {
+                return (float) $clean;
+            }
+
+            // Check if dot is thousand separator (e.g. 11.000 or 1.500.000)
+            if (preg_match('/\.\d{3}(?:\.|$)/', $clean)) {
+                $clean = str_replace('.', '', $clean);
+
+                return (float) $clean;
+            }
+        }
 
         return (float) $clean;
     }

@@ -18,32 +18,58 @@ class OrderCalculationService
         $normalizer = app(ProductNormalizationService::class);
         $parsed = $normalizer->parseDrugName($rawProductName, '');
 
-        // Canonical from defecta input has no unit (empty string), so try matching
-        // by name + strength to avoid Amlodipine 5mg matching Amlodipine 10mg.
-        $product = NormalizedProduct::where('parsed_name', $parsed['name'])
-            ->where('parsed_strength', $parsed['strength'])
-            ->first();
-
-        // Last resort: canonical exact match (succeeds if unit was somehow provided)
-        if (! $product) {
-            $product = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
+        // 1. Cari kandidat produk yang cocok.
+        // Jika kekuatan obat ada di request defecta (misal: Amlodipine 5mg), wajib cocokkan nama + kekuatan.
+        // Jika defecta tidak mencantumkan kekuatan (misal: CENDO CATARLENT), cocokkan berdasarkan nama saja.
+        $query = NormalizedProduct::query();
+        if (! empty($parsed['strength'])) {
+            $query->where('parsed_name', $parsed['name'])
+                ->where('parsed_strength', $parsed['strength']);
+        } else {
+            $query->where('parsed_name', $parsed['name']);
         }
 
-        if (! $product || empty($product->price_history_json)) {
+        $products = $query->get();
+
+        // Fallback: coba pencarian exact canonical jika tersedia
+        if ($products->isEmpty() && ! empty($parsed['canonical'])) {
+            $fallback = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
+            if ($fallback) {
+                $products = collect([$fallback]);
+            }
+        }
+
+        if ($products->isEmpty()) {
             return null;
         }
 
-        $canonicalName = $product->normalized_name;
+        // Kumpulkan semua penawaran supplier dari semua varian produk yang cocok
+        // (menghindari bug supplier terlewat karena perbedaan penulisan satuan Tablet/Strip/-)
+        $supplierOffers = [];
+        foreach ($products as $product) {
+            $canonicalName = $product->normalized_name;
+            foreach ($product->price_history_json ?? [] as $history) {
+                $sId = (int) $history['supplier_id'];
+                $price = (float) $history['price'];
+                if (! isset($supplierOffers[$sId]) || $price < $supplierOffers[$sId]['price']) {
+                    $supplierOffers[$sId] = array_merge($history, ['canonical' => $canonicalName]);
+                }
+            }
+        }
+
+        if (empty($supplierOffers)) {
+            return null;
+        }
 
         $bestPrice = PHP_FLOAT_MAX;
         $bestSupplier = null;
         $allCalculations = [];
 
         // Loop semua supplier yang punya harga untuk obat ini
-        foreach ($product->price_history_json as $history) {
-            $supplierId = $history['supplier_id'];
-            $basePrice = (float) $history['price'];
-            $rawName = $history['raw_name'];
+        foreach ($supplierOffers as $offer) {
+            $supplierId = $offer['supplier_id'];
+            $basePrice = (float) $offer['price'];
+            $rawName = $offer['raw_name'];
 
             $supplier = Supplier::find($supplierId);
             if (! $supplier || ! $supplier->is_active) {
@@ -51,7 +77,7 @@ class OrderCalculationService
             }
 
             // 1. Cari Diskon (Cek Spesifik dulu, baru Global)
-            $discountPct = $this->findDiscount($supplierId, $canonicalName, $qty);
+            $discountPct = $this->findDiscount($supplierId, $offer['canonical'], $qty);
 
             // 2. Potong Diskon
             $netPrice = $basePrice * (1 - ($discountPct / 100));
@@ -69,7 +95,7 @@ class OrderCalculationService
                 'is_ppn_included' => $supplier->is_ppn_included,
                 'final_price' => round($finalPrice, 2),
                 'raw_name' => $rawName,
-                'unit' => $history['unit'] ?? '-',
+                'unit' => $offer['unit'] ?? '-',
             ];
 
             $allCalculations[] = $result;
@@ -78,6 +104,10 @@ class OrderCalculationService
                 $bestPrice = $finalPrice;
                 $bestSupplier = $result;
             }
+        }
+
+        if (! $bestSupplier) {
+            return null;
         }
 
         return [

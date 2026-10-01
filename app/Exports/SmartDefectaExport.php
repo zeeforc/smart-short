@@ -18,16 +18,17 @@ class SmartDefectaExport implements FromArray, ShouldAutoSize, WithHeadings, Wit
         // Flatten and sort by supplier name so they are grouped together
         $exportData = [];
         foreach ($results as $res) {
-            if (isset($res['calculation']['winner'])) {
-                $exportData[] = [
-                    'request' => $res['request'],
-                    'winner' => $res['calculation']['winner'],
-                ];
-            }
+            $exportData[] = [
+                'request' => $res['request'],
+                'winner' => $res['calculation']['winner'] ?? null,
+            ];
         }
 
         usort($exportData, function ($a, $b) {
-            return strcmp($a['winner']['supplier_name'], $b['winner']['supplier_name']);
+            $nameA = $a['winner']['supplier_name'] ?? 'ZZZ_BELUM_ADA_PRICELIST';
+            $nameB = $b['winner']['supplier_name'] ?? 'ZZZ_BELUM_ADA_PRICELIST';
+
+            return strcmp($nameA, $nameB);
         });
 
         $this->results = $exportData;
@@ -58,6 +59,20 @@ class SmartDefectaExport implements FromArray, ShouldAutoSize, WithHeadings, Wit
         $winner = $row['winner'];
         $request = $row['request'];
         $qty = (int) $request['qty'];
+
+        if (! $winner) {
+            return [
+                'Belum Ada Pricelist',
+                $request['product_name'],
+                $qty,
+                '-',
+                '-',
+                '-',
+                '-',
+                '-',
+                '-',
+            ];
+        }
 
         $netPrice = round($winner['net_price'], 2);
         $finalPrice = round($winner['final_price'], 2);
