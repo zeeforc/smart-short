@@ -16,15 +16,30 @@ class SmartDefecta extends Page implements HasForms
 {
     use InteractsWithForms;
 
-    protected static \BackedEnum|string|null $navigationIcon = Heroicon::OutlinedShoppingCart;
+    public static function getNavigationIcon(): string|\BackedEnum|null
+    {
+        return Heroicon::OutlinedShoppingCart;
+    }
 
-    protected static ?string $navigationLabel = 'Smart Defecta (PO)';
+    public static function getNavigationLabel(): string
+    {
+        return 'Smart Defecta (PO)';
+    }
 
-    protected static ?string $title = 'Keranjang Belanja Pintar';
+    public function getTitle(): string
+    {
+        return 'Keranjang Belanja Pintar';
+    }
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Transaksi';
+    public static function getNavigationGroup(): ?string
+    {
+        return 'Transaksi';
+    }
 
-    protected static ?int $navigationSort = 1;
+    public static function getNavigationSort(): ?int
+    {
+        return 1;
+    }
 
     protected string $view = 'filament.pages.smart-defecta';
 
