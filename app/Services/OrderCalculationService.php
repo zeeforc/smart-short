@@ -13,9 +13,18 @@ class OrderCalculationService
      * Cari supplier termurah untuk suatu obat berdasarkan QTY
      * Termasuk memotong diskon dan menambah PPN (12%) jika belum include
      */
-    public function calculateBestSupplier(string $normalizedName, int $qty): ?array
+    public function calculateBestSupplier(string $rawProductName, int $qty): ?array
     {
-        $product = NormalizedProduct::where('normalized_name', $normalizedName)->first();
+        $normalizer = app(ProductNormalizationService::class);
+        $parsed = $normalizer->parseDrugName($rawProductName, '');
+        $canonicalName = $parsed['canonical'];
+
+        $product = NormalizedProduct::where('normalized_name', $canonicalName)->first();
+
+        // Coba cari pakai parsed_name kalau ga ketemu (fuzzy fallback)
+        if (! $product) {
+            $product = NormalizedProduct::where('parsed_name', $parsed['name'])->first();
+        }
 
         if (! $product || empty($product->price_history_json)) {
             return null; // Obat tidak ditemukan di database
@@ -37,7 +46,7 @@ class OrderCalculationService
             }
 
             // 1. Cari Diskon (Cek Spesifik dulu, baru Global)
-            $discountPct = $this->findDiscount($supplierId, $normalizedName, $qty);
+            $discountPct = $this->findDiscount($supplierId, $canonicalName, $qty);
 
             // 2. Potong Diskon
             $netPrice = $basePrice * (1 - ($discountPct / 100));

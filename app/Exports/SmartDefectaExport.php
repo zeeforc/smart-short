@@ -73,7 +73,7 @@ class SmartDefectaExport implements FromArray, WithHeadings, WithMapping, Should
         ];
     }
 
-    public function styles(Worksheet $sheet)
+    public function styles(Worksheet $sheet): ?array
     {
         return [
             1 => ['font' => ['bold' => true]],

@@ -192,8 +192,7 @@ class SmartDefecta extends Page implements HasTable
         $results = [];
 
         foreach ($items as $item) {
-            $normalizedName = strtoupper(trim($item->product_name));
-            $calc = $service->calculateBestSupplier($normalizedName, (int) $item->qty);
+            $calc = $service->calculateBestSupplier($item->product_name, (int) $item->qty);
 
             $results[] = [
                 'request' => [

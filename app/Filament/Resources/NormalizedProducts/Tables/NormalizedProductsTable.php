@@ -30,10 +30,11 @@ class NormalizedProductsTable
                 TextColumn::make('lowest_price')
                     ->formatStateUsing(fn ($state) => 'Rp '.number_format($state, 0, ',', '.'))
                     ->sortable(),
-                TextColumn::make('supplier.name')
+                TextColumn::make('supplier.company_name')
                     ->label('Sales / PT Termurah')
+                    ->default(fn ($record) => $record->supplier ? ($record->supplier->company_name ?: $record->supplier->name) : '-')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable(['name', 'company_name']),
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
