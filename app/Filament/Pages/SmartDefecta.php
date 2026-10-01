@@ -54,7 +54,7 @@ class SmartDefecta extends Page implements HasTable
     {
         return [
             Action::make('import_excel')
-                ->label('Upload File Excel')
+                ->label('Import Data Pesanan (Excel)')
                 ->icon('heroicon-m-arrow-up-tray')
                 ->color('success')
                 ->form([
@@ -173,7 +173,7 @@ class SmartDefecta extends Page implements HasTable
                 ]),
             ])
             ->emptyStateHeading('Keranjang masih kosong')
-            ->emptyStateDescription('Silakan upload file Excel atau tambah obat secara manual.');
+            ->emptyStateDescription('Silakan import data pesanan (Excel) atau tambah obat secara manual.');
     }
 
     public function calculate()
