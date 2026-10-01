@@ -13,7 +13,6 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Filament\Tables\Actions\Action as TableAction;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
@@ -130,7 +129,7 @@ class SmartDefecta extends Page implements HasTable
                     ->numeric(),
             ])
             ->headerActions([
-                TableAction::make('create')
+                Action::make('create')
                     ->label('Tambah Obat Manual')
                     ->icon('heroicon-m-plus')
                     ->form([
@@ -150,22 +149,22 @@ class SmartDefecta extends Page implements HasTable
                             'qty' => $data['qty'],
                         ]);
                     }),
-                TableAction::make('kalkulasi')
+                Action::make('kalkulasi')
                     ->label('Kalkulasi Pemenang')
                     ->icon('heroicon-m-calculator')
                     ->color('primary')
                     ->action(fn () => $this->calculate()),
             ])
             ->actions([
-                TableAction::make('delete')
+                Action::make('delete')
                     ->icon('heroicon-m-trash')
                     ->color('danger')
                     ->requiresConfirmation()
                     ->action(fn ($record) => $record->delete()),
             ])
             ->bulkActions([
-                \Filament\Tables\Actions\BulkActionGroup::make([
-                    \Filament\Tables\Actions\BulkAction::make('delete')
+                \Filament\Actions\BulkActionGroup::make([
+                    \Filament\Actions\BulkAction::make('delete')
                         ->label('Delete')
                         ->icon('heroicon-m-trash')
                         ->color('danger')
