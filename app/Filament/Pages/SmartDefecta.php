@@ -41,6 +41,63 @@ class SmartDefecta extends Page implements HasForms
         return 1;
     }
 
+    protected function getHeaderActions(): array
+    {
+        return [
+            \Filament\Actions\Action::make('import_excel')
+                ->label('Upload File Excel')
+                ->icon('heroicon-m-arrow-up-tray')
+                ->color('success')
+                ->form([
+                    \Filament\Forms\Components\FileUpload::make('file')
+                        ->label('File Excel')
+                        ->disk('local')
+                        ->directory('imports')
+                        ->acceptedFileTypes([
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            'application/vnd.ms-excel',
+                            'text/csv'
+                        ])
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $filePath = storage_path('app/' . $data['file']);
+                    
+                    $import = new \App\Imports\SmartDefectaImport();
+                    \Maatwebsite\Excel\Facades\Excel::import($import, $filePath);
+
+                    $validItems = collect($import->data)->filter(function ($item) {
+                        return !empty($item['product_name']);
+                    })->values()->toArray();
+
+                    if (count($validItems) > 0) {
+                        // In Livewire/Filament, updating the state directly works well if we call fill() or just update the property
+                        // The items repeater state is mapped to $this->items (since statePath is 'items')
+                        // We also might want to clear the old items or append. Let's replace for now.
+                        
+                        // We should format it the way Repeater expects (UUID keys)
+                        $repeaterData = [];
+                        foreach ($validItems as $item) {
+                            $repeaterData[\Illuminate\Support\Str::uuid()->toString()] = $item;
+                        }
+                        
+                        $this->items = $repeaterData;
+                        $this->form->fill(['items' => $repeaterData]);
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Berhasil import ' . count($validItems) . ' obat dari Excel')
+                            ->success()
+                            ->send();
+                    } else {
+                        \Filament\Notifications\Notification::make()
+                            ->title('Gagal import, format tidak sesuai atau kosong')
+                            ->danger()
+                            ->send();
+                    }
+                }),
+        ];
+    }
+
     protected string $view = 'filament.pages.smart-defecta';
 
     public ?array $items = [];
