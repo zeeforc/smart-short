@@ -33,6 +33,8 @@ class OrderCalculationService
             return null;
         }
 
+        $canonicalName = $product->normalized_name;
+
         $bestPrice = PHP_FLOAT_MAX;
         $bestSupplier = null;
         $allCalculations = [];
