@@ -91,24 +91,38 @@ class ProductNormalizationService
                 ],
             ]);
         } else {
-            // Kalau barangnya ketemu, kita update history harga
             $history = $matchedProduct->price_history_json ?? [];
 
-            // Tambahkan data dari sales ini ke daftar history
-            $history[] = [
+            // Replace entri lama dari supplier yang sama, jangan append
+            $existingIndex = null;
+            foreach ($history as $idx => $entry) {
+                if ((int) $entry['supplier_id'] === (int) $raw->supplier_id) {
+                    $existingIndex = $idx;
+                    break;
+                }
+            }
+
+            $entry = [
                 'supplier_id' => $raw->supplier_id,
                 'raw_name' => $raw->raw_name,
                 'price' => $raw->price,
                 'unit' => $raw->raw_unit,
             ];
 
-            // Cek apakah harga dari sales ini LEBIH MURAH dari harga terendah saat ini
-            $isCheaper = $raw->price < $matchedProduct->lowest_price;
+            if ($existingIndex !== null) {
+                $history[$existingIndex] = $entry;
+            } else {
+                $history[] = $entry;
+            }
+
+            // Recalculate lowest_price dari semua history yang sudah diperbarui
+            $lowestPrice = min(array_column($history, 'price'));
+            $bestSupplierId = collect($history)->firstWhere('price', $lowestPrice)['supplier_id'];
 
             $matchedProduct->update([
                 'price_history_json' => $history,
-                'lowest_price' => $isCheaper ? $raw->price : $matchedProduct->lowest_price,
-                'best_supplier_id' => $isCheaper ? $raw->supplier_id : $matchedProduct->best_supplier_id,
+                'lowest_price' => $lowestPrice,
+                'best_supplier_id' => $bestSupplierId,
             ]);
         }
     }

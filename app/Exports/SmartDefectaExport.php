@@ -3,13 +3,13 @@
 namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
-use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class SmartDefectaExport implements FromArray, WithHeadings, WithMapping, ShouldAutoSize, WithStyles
+class SmartDefectaExport implements FromArray, ShouldAutoSize, WithHeadings, WithMapping, WithStyles
 {
     protected array $results;
 
@@ -25,7 +25,7 @@ class SmartDefectaExport implements FromArray, WithHeadings, WithMapping, Should
                 ];
             }
         }
-        
+
         usort($exportData, function ($a, $b) {
             return strcmp($a['winner']['supplier_name'], $b['winner']['supplier_name']);
         });
@@ -46,9 +46,10 @@ class SmartDefectaExport implements FromArray, WithHeadings, WithMapping, Should
             'QTY',
             'Harga Dasar (Rp)',
             'Diskon (%)',
+            'Harga Netto/Item (Rp)',
             'PPN 12%',
-            'Harga Final / Item (Rp)',
-            'Total Harga (Rp)'
+            'Harga Final/Item (Rp)',
+            'Total Harga (Rp)',
         ];
     }
 
@@ -57,19 +58,22 @@ class SmartDefectaExport implements FromArray, WithHeadings, WithMapping, Should
         $winner = $row['winner'];
         $request = $row['request'];
         $qty = (int) $request['qty'];
-        
-        $finalPrice = $winner['final_price'];
-        $totalPrice = $finalPrice * $qty;
+
+        $netPrice = round($winner['net_price'], 2);
+        $finalPrice = round($winner['final_price'], 2);
+        $ppnAmount = $winner['is_ppn_included'] ? 0 : round($finalPrice - $netPrice, 2);
+        $totalPrice = round($finalPrice * $qty, 2);
 
         return [
             $winner['supplier_name'],
             $request['product_name'],
             $qty,
             $winner['base_price'],
-            $winner['discount_pct'] . '%',
-            $winner['is_ppn_included'] ? 'Termasuk' : '+12%',
+            $winner['discount_pct'].'%',
+            $netPrice,
+            $ppnAmount,
             $finalPrice,
-            $totalPrice
+            $totalPrice,
         ];
     }
 
