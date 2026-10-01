@@ -61,31 +61,29 @@ class ProductNormalizationService
         ];
     }
 
-    /**
-     * Logic inti Canonical Matching & Perbandingan Harga
-     */
-    public function normalizeAndCompare(RawProduct $raw)
+    public function normalizeAndCompare(RawProduct $raw): void
     {
-        // 1. Ekstrak komponen kanonik
         $parsed = $this->parseDrugName($raw->raw_name, (string) $raw->raw_unit);
 
-        // 2. Cari berdasarkan canonical key persis (sudah di uppercase)
+        // Normalize price to per-unit to handle suppliers that price per box/pack.
+        $qtyPerPack = max(1, (int) ($raw->qty_per_pack ?? 1));
+        $pricePerUnit = round($raw->price / $qtyPerPack, 4);
+
         $matchedProduct = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
 
         if (! $matchedProduct) {
-            // Kalau nggak ketemu, berarti barang baru
             NormalizedProduct::create([
                 'normalized_name' => $parsed['canonical'],
                 'parsed_name' => $parsed['name'],
                 'parsed_strength' => $parsed['strength'],
                 'parsed_form' => $parsed['form'],
-                'lowest_price' => $raw->price,
+                'lowest_price' => $pricePerUnit,
                 'best_supplier_id' => $raw->supplier_id,
                 'price_history_json' => [
                     [
                         'supplier_id' => $raw->supplier_id,
                         'raw_name' => $raw->raw_name,
-                        'price' => $raw->price,
+                        'price' => $pricePerUnit,
                         'unit' => $raw->raw_unit,
                     ],
                 ],
@@ -93,7 +91,7 @@ class ProductNormalizationService
         } else {
             $history = $matchedProduct->price_history_json ?? [];
 
-            // Replace entri lama dari supplier yang sama, jangan append
+            // Replace existing entry from the same supplier instead of appending.
             $existingIndex = null;
             foreach ($history as $idx => $entry) {
                 if ((int) $entry['supplier_id'] === (int) $raw->supplier_id) {
@@ -105,7 +103,7 @@ class ProductNormalizationService
             $entry = [
                 'supplier_id' => $raw->supplier_id,
                 'raw_name' => $raw->raw_name,
-                'price' => $raw->price,
+                'price' => $pricePerUnit,
                 'unit' => $raw->raw_unit,
             ];
 
@@ -115,7 +113,6 @@ class ProductNormalizationService
                 $history[] = $entry;
             }
 
-            // Recalculate lowest_price dari semua history yang sudah diperbarui
             $lowestPrice = min(array_column($history, 'price'));
             $bestSupplierId = collect($history)->firstWhere('price', $lowestPrice)['supplier_id'];
 

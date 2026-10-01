@@ -17,17 +17,20 @@ class OrderCalculationService
     {
         $normalizer = app(ProductNormalizationService::class);
         $parsed = $normalizer->parseDrugName($rawProductName, '');
-        $canonicalName = $parsed['canonical'];
 
-        $product = NormalizedProduct::where('normalized_name', $canonicalName)->first();
+        // Canonical from defecta input has no unit (empty string), so try matching
+        // by name + strength to avoid Amlodipine 5mg matching Amlodipine 10mg.
+        $product = NormalizedProduct::where('parsed_name', $parsed['name'])
+            ->where('parsed_strength', $parsed['strength'])
+            ->first();
 
-        // Coba cari pakai parsed_name kalau ga ketemu (fuzzy fallback)
+        // Last resort: canonical exact match (succeeds if unit was somehow provided)
         if (! $product) {
-            $product = NormalizedProduct::where('parsed_name', $parsed['name'])->first();
+            $product = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
         }
 
         if (! $product || empty($product->price_history_json)) {
-            return null; // Obat tidak ditemukan di database
+            return null;
         }
 
         $bestPrice = PHP_FLOAT_MAX;
