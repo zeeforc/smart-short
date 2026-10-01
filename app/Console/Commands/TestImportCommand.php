@@ -2,21 +2,24 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
+use App\Imports\RawProductImport;
+use App\Models\NormalizedProduct;
+use App\Models\RawProduct;
 use App\Models\Supplier;
 use App\Models\UploadBatch;
 use App\Models\UploadFile;
-use App\Models\RawProduct;
-use App\Models\NormalizedProduct;
-use App\Imports\RawProductImport;
+use App\Models\User;
 use App\Services\ProductNormalizationService;
-use Maatwebsite\Excel\Facades\Excel;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 
 class TestImportCommand extends Command
 {
     protected $signature = 'test:import';
+
     protected $description = 'Simulasi upload 2 file excel dan tes fuzzy matching';
 
     public function handle(ProductNormalizationService $normalizer)
@@ -33,7 +36,7 @@ class TestImportCommand extends Command
         DB::statement('SET FOREIGN_KEY_CHECKS=1;');
 
         // 1.5 Bikin User Dummy
-        $user = \App\Models\User::firstOrCreate(
+        $user = User::firstOrCreate(
             ['email' => 'admin@test.com'],
             ['name' => 'Admin Test', 'password' => bcrypt('password')]
         );
@@ -62,7 +65,7 @@ class TestImportCommand extends Command
 
         // Jalankan Queue Worker sebentar untuk memproses import di background
         $this->info('⏳ Menjalankan Queue Worker untuk memproses import...');
-        \Illuminate\Support\Facades\Artisan::call('queue:work', ['--stop-when-empty' => true]);
+        Artisan::call('queue:work', ['--stop-when-empty' => true]);
 
         // 6. Jalankan Service Fuzzy Matching
         $this->info('🧠 Menjalankan Algoritma Fuzzy Matching...');
@@ -74,16 +77,16 @@ class TestImportCommand extends Command
         $normalized = NormalizedProduct::all();
         $headers = ['Nama Bersih (Normalized)', 'Harga Termurah', 'Supplier Termurah', 'Total Sales yg Jual'];
         $data = [];
-        
+
         foreach ($normalized as $p) {
             $history = is_array($p->price_history_json) ? $p->price_history_json : json_decode($p->price_history_json, true) ?? [];
             $supplierName = Supplier::find($p->best_supplier_id)->name ?? '-';
-            
+
             $data[] = [
                 $p->normalized_name,
-                "Rp " . number_format($p->lowest_price, 0, ',', '.'),
+                'Rp '.number_format($p->lowest_price, 0, ',', '.'),
                 $supplierName,
-                count($history) . ' Sales'
+                count($history).' Sales',
             ];
         }
 

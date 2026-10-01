@@ -19,9 +19,13 @@ class UploadBatchResource extends Resource
     protected static ?string $model = UploadBatch::class;
 
     protected static \UnitEnum|string|null $navigationGroup = 'Impor & Riwayat';
+
     protected static ?string $navigationLabel = 'Upload Pricelist';
+
     protected static ?string $modelLabel = 'Sesi Upload';
+
     protected static ?string $pluralModelLabel = 'Upload Pricelist Baru';
+
     protected static ?int $navigationSort = 2;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentArrowUp;

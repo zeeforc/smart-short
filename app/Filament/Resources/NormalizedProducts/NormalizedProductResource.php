@@ -19,9 +19,13 @@ class NormalizedProductResource extends Resource
     protected static ?string $model = NormalizedProduct::class;
 
     protected static \UnitEnum|string|null $navigationGroup = 'Laporan Sortir';
+
     protected static ?string $navigationLabel = 'Harga Terbaik';
+
     protected static ?string $modelLabel = 'Harga Terbaik';
+
     protected static ?string $pluralModelLabel = 'Daftar Harga Terbaik';
+
     protected static ?int $navigationSort = 5;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTrophy;

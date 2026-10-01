@@ -26,8 +26,11 @@ class UploadFilesTable
                 TextColumn::make('progress')
                     ->label('Progress (%)')
                     ->getStateUsing(function ($record) {
-                        if ($record->total_rows == 0) return 0;
+                        if ($record->total_rows == 0) {
+                            return 0;
+                        }
                         $progress = ($record->processed_rows / $record->total_rows) * 100;
+
                         return min(100, round($progress));
                     })
                     ->formatStateUsing(fn ($state) => "

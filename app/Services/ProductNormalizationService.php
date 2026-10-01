@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\RawProduct;
 use App\Models\NormalizedProduct;
+use App\Models\RawProduct;
 use Illuminate\Support\Facades\Log;
 
 class ProductNormalizationService
@@ -17,7 +17,7 @@ class ProductNormalizationService
         Log::info("Memulai proses normalisasi untuk Batch: {$uploadBatchId}");
 
         // Ambil semua raw product yang berasal dari file-file di batch ini
-        $rawProducts = RawProduct::whereHas('uploadFile', function($q) use ($uploadBatchId) {
+        $rawProducts = RawProduct::whereHas('uploadFile', function ($q) use ($uploadBatchId) {
             $q->where('upload_batch_id', $uploadBatchId);
         })->get();
 
@@ -41,22 +41,22 @@ class ProductNormalizationService
 
         $strength = null;
         if ($m) {
-            $value = rtrim(rtrim(number_format((float)$m[1], 3, '.', ''), '0'), '.');
-            $strength = $value . $m[2] . (isset($m[4]) ? "/{$m[3]}{$m[4]}" : '');
+            $value = rtrim(rtrim(number_format((float) $m[1], 3, '.', ''), '0'), '.');
+            $strength = $value.$m[2].(isset($m[4]) ? "/{$m[3]}{$m[4]}" : '');
         }
 
         // Hapus keterangan kekuatan dari nama
         $name = trim(preg_replace('/\s+/', ' ', $m ? str_replace($m[0], '', $s) : $s));
-        
+
         // Bersihkan tanda kurung kemasan spt (box), (strip)
         $name = trim(preg_replace('/\([^)]+\)/', '', $name));
 
         $form = mb_strtolower(trim($rawUnit));
 
         return [
-            'name'      => strtoupper($name),
-            'strength'  => $strength ? strtoupper($strength) : null,
-            'form'      => strtoupper($form),
+            'name' => strtoupper($name),
+            'strength' => $strength ? strtoupper($strength) : null,
+            'form' => strtoupper($form),
             'canonical' => strtoupper(implode('|', [$name, $strength, $form])),
         ];
     }
@@ -68,11 +68,11 @@ class ProductNormalizationService
     {
         // 1. Ekstrak komponen kanonik
         $parsed = $this->parseDrugName($raw->raw_name, (string) $raw->raw_unit);
-        
+
         // 2. Cari berdasarkan canonical key persis (sudah di uppercase)
         $matchedProduct = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
 
-        if (!$matchedProduct) {
+        if (! $matchedProduct) {
             // Kalau nggak ketemu, berarti barang baru
             NormalizedProduct::create([
                 'normalized_name' => $parsed['canonical'],
@@ -87,13 +87,13 @@ class ProductNormalizationService
                         'raw_name' => $raw->raw_name,
                         'price' => $raw->price,
                         'unit' => $raw->raw_unit,
-                    ]
-                ]
+                    ],
+                ],
             ]);
         } else {
             // Kalau barangnya ketemu, kita update history harga
             $history = $matchedProduct->price_history_json ?? [];
-            
+
             // Tambahkan data dari sales ini ke daftar history
             $history[] = [
                 'supplier_id' => $raw->supplier_id,

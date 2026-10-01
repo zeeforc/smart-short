@@ -28,7 +28,7 @@ class NormalizedProductsTable
                     ->label('Bentuk Sediaan')
                     ->searchable(),
                 TextColumn::make('lowest_price')
-                    ->formatStateUsing(fn ($state) => 'Rp ' . number_format($state, 0, ',', '.'))
+                    ->formatStateUsing(fn ($state) => 'Rp '.number_format($state, 0, ',', '.'))
                     ->sortable(),
                 TextColumn::make('supplier.name')
                     ->label('Sales / PT Termurah')

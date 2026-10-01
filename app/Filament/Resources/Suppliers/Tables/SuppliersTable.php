@@ -24,6 +24,9 @@ class SuppliersTable
                 TextColumn::make('phone')
                     ->label('No. Telepon')
                     ->searchable(),
+                IconColumn::make('is_ppn_included')
+                    ->label('Include PPN')
+                    ->boolean(),
                 IconColumn::make('is_active')
                     ->label('Status')
                     ->boolean(),

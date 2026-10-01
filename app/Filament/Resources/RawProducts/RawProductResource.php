@@ -19,9 +19,13 @@ class RawProductResource extends Resource
     protected static ?string $model = RawProduct::class;
 
     protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
+
     protected static ?string $navigationLabel = 'Data Mentah (Cache)';
+
     protected static ?string $modelLabel = 'Data Mentah';
+
     protected static ?string $pluralModelLabel = 'Data Mentah (Sementara)';
+
     protected static ?int $navigationSort = 4;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCircleStack;

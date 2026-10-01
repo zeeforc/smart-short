@@ -25,7 +25,7 @@ class RawProductsTable
                 TextColumn::make('raw_unit')
                     ->searchable(),
                 TextColumn::make('price')
-                    ->formatStateUsing(fn ($state) => 'Rp ' . number_format($state, 0, ',', '.'))
+                    ->formatStateUsing(fn ($state) => 'Rp '.number_format($state, 0, ',', '.'))
                     ->sortable(),
                 TextColumn::make('discount')
                     ->numeric()
