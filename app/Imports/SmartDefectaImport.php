@@ -13,7 +13,7 @@ class SmartDefectaImport implements ToCollection, WithHeadingRow
     /**
     * @param Collection $collection
     */
-    public function collection(Collection $collection)
+    public function collection(Collection $collection): void
     {
         foreach ($collection as $row) {
             $this->data[] = [
