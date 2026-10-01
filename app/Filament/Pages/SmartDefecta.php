@@ -22,7 +22,7 @@ class SmartDefecta extends Page implements HasForms
 
     protected static ?string $title = 'Keranjang Belanja Pintar';
 
-    protected static ?string $navigationGroup = 'Transaksi';
+    protected static \UnitEnum|string|null $navigationGroup = 'Transaksi';
 
     protected static ?int $navigationSort = 1;
 
