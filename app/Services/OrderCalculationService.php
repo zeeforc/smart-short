@@ -31,7 +31,19 @@ class OrderCalculationService
 
         $products = $query->get();
 
-        // Fallback: coba pencarian exact canonical jika tersedia
+        // Fallback 1: cari lewat tabel alias yang dijodohkan manual sebelumnya
+        if ($products->isEmpty()) {
+            $alias = \App\Models\ProductAlias::where('alias_normalized', $parsed['canonical'])->first();
+            if (! $alias) {
+                $alias = \App\Models\ProductAlias::where('alias_raw', mb_strtolower(trim($rawProductName)))->first();
+            }
+
+            if ($alias && $alias->normalizedProduct) {
+                $products = collect([$alias->normalizedProduct]);
+            }
+        }
+
+        // Fallback 2: coba pencarian exact canonical jika tersedia
         if ($products->isEmpty() && ! empty($parsed['canonical'])) {
             $fallback = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
             if ($fallback) {

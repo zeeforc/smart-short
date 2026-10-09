@@ -219,7 +219,17 @@
                                 <div class="sd-total-value">Rp {{ number_format($calc['winner']['final_price'] * $res['request']['qty'], 0, ',', '.') }}</div>
                             </div>
                         @else
-                            <span class="sd-badge-missing">Belum Ada Pricelist</span>
+                            <button 
+                                wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}' })"
+                                class="sd-badge-missing"
+                                style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
+                                title="Klik untuk mencocokkan obat secara manual"
+                            >
+                                <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                </svg>
+                                Belum Ada Pricelist (Jodohkan)
+                            </button>
                         @endif
                     </div>
 

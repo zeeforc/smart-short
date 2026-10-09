@@ -226,4 +226,53 @@ class SmartDefecta extends Page implements HasTable
             'SP_Defecta_' . date('Ymd_His') . '.xlsx'
         );
     }
+
+    public function jodohkanAction(): Action
+    {
+        return Action::make('jodohkan')
+            ->label('Jodohkan Manual Obat')
+            ->form([
+                \Filament\Forms\Components\TextInput::make('raw_name')
+                    ->label('Nama Asli di Defecta')
+                    ->disabled(),
+                \Filament\Forms\Components\Select::make('normalized_product_id')
+                    ->label('Pilih Obat Asli')
+                    ->options(function () {
+                        return \App\Models\NormalizedProduct::query()
+                            ->selectRaw("id, concat(parsed_name, ' ', ifnull(parsed_strength, '')) as full_name")
+                            ->pluck('full_name', 'id');
+                    })
+                    ->searchable()
+                    ->required(),
+            ])
+            ->fillForm(function (array $arguments) {
+                return [
+                    'raw_name' => $arguments['raw_name'] ?? '',
+                ];
+            })
+            ->action(function (array $data, array $arguments) {
+                $rawName = $arguments['raw_name'] ?? '';
+                if (!$rawName) return;
+
+                $normalizer = app(\App\Services\ProductNormalizationService::class);
+                $parsed = $normalizer->parseDrugName($rawName, '');
+                
+                \App\Models\ProductAlias::updateOrCreate(
+                    [
+                        'alias_normalized' => $parsed['canonical'],
+                    ],
+                    [
+                        'alias_raw' => $rawName,
+                        'normalized_product_id' => $data['normalized_product_id']
+                    ]
+                );
+                
+                \Filament\Notifications\Notification::make()
+                    ->title('Berhasil dijodohkan! Data akan dikalkulasi ulang.')
+                    ->success()
+                    ->send();
+
+                $this->calculate();
+            });
+    }
 }
