@@ -77,7 +77,8 @@ class SmartDefectaImport implements ToCollection
 
             if ($dataStarted) {
                 // Get the product name and qty based on detected indices
-                $productName = trim((string) ($values[$nameIndex] ?? ''));
+                $rawProductName = (string) ($values[$nameIndex] ?? '');
+                $productName = trim(preg_replace('/\s+/', ' ', str_replace("\u{00A0}", ' ', $rawProductName)));
                 $qtyVal = $values[$qtyIndex] ?? null;
 
                 // If Name is empty, skip
@@ -85,24 +86,32 @@ class SmartDefectaImport implements ToCollection
                     continue;
                 }
 
-                // Clean Qty
+                // Clean Qty (handle texts like "5 B0X", "10 POT")
                 $qty = 1;
-                if (is_numeric($qtyVal) && $qtyVal > 0) {
-                    $qty = (int) $qtyVal;
+                $qtyStr = (string)$qtyVal;
+                
+                if (preg_match('/(\d+)/', $qtyStr, $matches) && (int)$matches[1] > 0) {
+                    $qty = (int) $matches[1];
                 } else {
                     // Fallback to searching for numeric qty in the row if the index failed
                     foreach ($values as $idx => $val) {
-                        if ($idx !== $nameIndex && $idx !== 0 && is_numeric($val) && $val > 0) {
-                            $qty = (int) $val;
+                        if ($idx !== $nameIndex && $idx !== 0 && preg_match('/(\d+)/', (string)$val, $m) && (int)$m[1] > 0) {
+                            $qty = (int) $m[1];
                             break;
                         }
                     }
                 }
 
-                $this->data[] = [
-                    'product_name' => $productName,
-                    'qty' => $qty,
-                ];
+                // Aggregate duplicate rows
+                $key = strtolower($productName);
+                if (isset($this->data[$key])) {
+                    $this->data[$key]['qty'] += $qty;
+                } else {
+                    $this->data[$key] = [
+                        'product_name' => $productName,
+                        'qty' => $qty,
+                    ];
+                }
             }
         }
     }

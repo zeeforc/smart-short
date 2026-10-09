@@ -33,20 +33,25 @@ class ProductNormalizationService
      */
     public function parseDrugName(string $rawName, string $rawUnit): array
     {
-        $s = mb_strtolower(trim($rawName));
+        $s = str_replace("\u{00A0}", ' ', $rawName); // NBSP
+        $s = mb_strtolower(trim($s));
 
         // Hapus simbol bullet / minus di awal seperti "- CENDO", "* PARACETAMOL"
         $s = preg_replace('/^[-\*\•\.\s]+/', '', $s);
 
         // Standarisasi angka desimal koma ke titik (12,5 -> 12.5)
         $s = preg_replace('/(\d+),(\d+)/', '$1.$2', $s);
+        
+        // Hapus spasi antara angka dan satuan (400 MG -> 400MG)
+        $s = preg_replace('/(\d)\s*(mg|mcg|gr|gm|ml|g|iu|cc|%)\b/i', '$1$2', $s);
+        
         $s = trim(preg_replace('/\s+/', ' ', $s));
 
         // Bersihkan tanda kurung kemasan spt (besar), (kecil), (box), (strip), (nr)
         $s = trim(preg_replace('/\([^)]*\)/', '', $s));
 
-        // Ekstrak kekuatan/volume dosis: "500 mg", "5%", "100 mg/5 ml", "15 ml", "5 ml", "0.6 ml"
-        preg_match('/(\d+(?:\.\d+)?)\s*(mg|mcg|g|iu|%|ml|l)(?:\s*\/\s*(\d+(?:\.\d+)?)\s*(ml|l))?/i', $s, $m);
+        // Ekstrak kekuatan/volume dosis
+        preg_match('/(\d+(?:\.\d+)?)\s*(mg|mcg|g|gr|gm|iu|%|ml|l)(?:\s*\/\s*(\d+(?:\.\d+)?)\s*(ml|l))?/i', $s, $m);
 
         $strength = null;
         if ($m) {
@@ -63,20 +68,50 @@ class ProductNormalizationService
             $s = str_replace($m[0], ' ', $s);
         }
 
-        // Bersihkan kata-kata penanda kemasan / bentuk yang sering nempel di nama produk
-        $noiseWords = [
-            '/\b(e\.d|ed|tm|tt|tetes mata|tetes telinga)\b/i',
-            '/\b(no\s*retur|noret|no\s*return|nr)\b/i',
-            '/\b(strip|blister|box|botol|btl|fls|tube|pot|vial|amp)\b/i',
-            '/\b(10x10|10\s*x\s*10|5x10|3x10|30x10|50x10)\b/i',
-        ];
-        foreach ($noiseWords as $pattern) {
-            $s = preg_replace($pattern, ' ', $s);
-        }
-
         // Hapus pemisah tanda hubung atau garis miring yang tersisa
         $s = preg_replace('/[-\/]/', ' ', $s);
         $s = trim(preg_replace('/\s+/', ' ', $s));
+
+        $synonyms = [
+            'TABLET'=>'TAB','KAPLET'=>'KAP','KAPL'=>'KAP','KPT'=>'KAP','KAPS'=>'KAP',
+            'KAPSUL'=>'KAP','CAPS'=>'KAP','CAP'=>'KAP',
+            'SYRUP'=>'SYR','SIRUP'=>'SYR','SUSPENSI'=>'SYR','SUSP'=>'SYR',
+            'CREAM'=>'CR','KRIM'=>'CR','SALEP'=>'OINT',
+            'INJEKSI'=>'INJ','TETES'=>'DROP','DROPS'=>'DROP','TTS'=>'DROP',
+            'GRAM'=>'GR','GM'=>'GR','G'=>'GR',
+            'METILPREDNISOLON'=>'METHYLPREDNISOLONE',
+            'ACETYLSISTEIN'=>'ACETYLCYSTEINE','ACETYLCYSTEIN'=>'ACETYLCYSTEINE',
+        ];
+
+        $noise = [
+            'NORET','NORETUR','NRT','NR','RETUR','NO','NEW',
+            'STRIP','BLISTER','BOX','BOTOL','BTL','FLS','TUBE','POT','VIAL','AMP',
+            'E.D','ED','TM','TT',
+        ];
+
+        $words = explode(' ', $s);
+        $finalWords = [];
+        foreach ($words as $word) {
+            $upper = strtoupper($word);
+            
+            // Filter noise
+            if (in_array($upper, $noise, true)) {
+                continue;
+            }
+            
+            // Hapus ukuran box seperti 10x10, 5x10
+            if (preg_match('/^\d+\s*x\s*\d+$/i', $word)) {
+                continue;
+            }
+            
+            // Map synonym
+            if (isset($synonyms[$upper])) {
+                $finalWords[] = strtolower($synonyms[$upper]);
+            } else {
+                $finalWords[] = $word;
+            }
+        }
+        $s = implode(' ', $finalWords);
 
         // Hapus duplikasi nama brand/pabrik di akhir (misal: "cendo catarlent cendo")
         $words = explode(' ', $s);
