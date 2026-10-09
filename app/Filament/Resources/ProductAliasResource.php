@@ -5,7 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ProductAliasResource\Pages;
 use App\Models\ProductAlias;
 use Filament\Forms;
-use Filament\Forms\Form;
+use Filament\Schemas\Schema;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -14,17 +14,17 @@ class ProductAliasResource extends Resource
 {
     protected static ?string $model = ProductAlias::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
+    protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-arrows-right-left';
     
     protected static ?string $navigationLabel = 'Alias & Jodohkan Obat';
     
-    protected static ?string $navigationGroup = 'Master Data';
+    protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
     
     protected static ?string $pluralModelLabel = 'Alias Obat';
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form
+        return $schema
             ->schema([
                 Forms\Components\TextInput::make('alias_raw')
                     ->label('Nama Ketikan Obat (Raw)')

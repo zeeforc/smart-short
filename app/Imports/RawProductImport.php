@@ -27,6 +27,7 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
     public $header_row;
 
     public $global_discount;
+    public $mapping = [];
 
     public function __construct($upload_file_id, $supplier_id, $header_row = 1, $global_discount = null)
     {
@@ -34,6 +35,9 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         $this->supplier_id = $supplier_id;
         $this->header_row = $header_row;
         $this->global_discount = $global_discount;
+        
+        $supplier = \App\Models\Supplier::find($supplier_id);
+        $this->mapping = $supplier ? ($supplier->column_mapping ?? []) : [];
     }
 
     public function headingRow(): int
@@ -43,17 +47,17 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
 
     public function model(array $row): Model|array|null
     {
+        // 0. Siapkan keyword pencarian kolom (bisa dari setting supplier atau default)
+        $nameKw = !empty($this->mapping['name_keywords']) ? array_map('trim', explode(',', $this->mapping['name_keywords'])) : ['nama', 'obat', 'produk', 'item', 'name', 'deskripsi'];
+        $unitKw = !empty($this->mapping['unit_keywords']) ? array_map('trim', explode(',', $this->mapping['unit_keywords'])) : ['satuan', 'unit', 'kemasan', 'box', 'kemas', 'bentuk'];
+        $priceKw = !empty($this->mapping['price_keywords']) ? array_map('trim', explode(',', $this->mapping['price_keywords'])) : ['grosir', 'harga', 'price', 'hrg', 'modal', 'hpp', 'hna'];
+        $discKw = !empty($this->mapping['discount_keywords']) ? array_map('trim', explode(',', $this->mapping['discount_keywords'])) : ['diskon', 'discount', 'disc', 'potongan'];
+
         // Deteksi kolom secara dinamis
-        $name = $this->findValue($row, ['nama', 'obat', 'produk', 'item', 'name', 'deskripsi']);
-        $unit = $this->findValue($row, ['satuan', 'unit', 'kemasan', 'box', 'kemas', 'bentuk']);
-
-        // Prioritaskan mencari Harga Grosir dulu, kalau nggak ketemu baru cari Harga biasa
-        $price = $this->findValue($row, ['grosir']);
-        if (! $price) {
-            $price = $this->findValue($row, ['harga', 'price', 'hrg', 'modal', 'hpp', 'hna']);
-        }
-
-        $discount = $this->findValue($row, ['diskon', 'discount', 'disc', 'potongan']);
+        $name = $this->findValue($row, $nameKw);
+        $unit = $this->findValue($row, $unitKw);
+        $price = $this->findValue($row, $priceKw);
+        $discount = $this->findValue($row, $discKw);
 
         $cleanedPrice = $this->cleanNumber($price);
         $lowerName = strtolower(trim(strval($name)));

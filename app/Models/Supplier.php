@@ -12,6 +12,7 @@ class Supplier extends Model
     protected $casts = [
         'is_ppn_included' => 'boolean',
         'is_active' => 'boolean',
+        'column_mapping' => 'array',
     ];
 
     public function supplierDiscountTiers(): HasMany
