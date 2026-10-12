@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Suppliers\Schemas;
 
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 class SupplierForm
@@ -24,7 +25,7 @@ class SupplierForm
                     ->helperText('Aktifkan jika harga di file Excel/PDF sudah termasuk PPN. Jika dinonaktifkan, sistem akan otomatis menambahkan PPN saat membandingkan harga termurah.'),
                 Toggle::make('is_active')
                     ->required(),
-                \Filament\Schemas\Components\Section::make('Smart Mapping (Kolom Excel)')
+                Section::make('Smart Mapping (Kolom Excel)')
                     ->description('Masukkan nama kolom (header) yang dipakai supplier ini. Pisahkan dengan koma jika ada beberapa alternatif kata.')
                     ->schema([
                         TextInput::make('column_mapping.name_keywords')

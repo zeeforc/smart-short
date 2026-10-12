@@ -3,6 +3,7 @@
 namespace App\Imports;
 
 use App\Models\RawProduct;
+use App\Models\Supplier;
 use App\Models\UploadBatch;
 use App\Models\UploadFile;
 use App\Services\ProductNormalizationService;
@@ -27,6 +28,7 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
     public $header_row;
 
     public $global_discount;
+
     public $mapping = [];
 
     public function __construct($upload_file_id, $supplier_id, $header_row = 1, $global_discount = null)
@@ -35,8 +37,8 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         $this->supplier_id = $supplier_id;
         $this->header_row = $header_row;
         $this->global_discount = $global_discount;
-        
-        $supplier = \App\Models\Supplier::find($supplier_id);
+
+        $supplier = Supplier::find($supplier_id);
         $this->mapping = $supplier ? ($supplier->column_mapping ?? []) : [];
     }
 
@@ -48,10 +50,10 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
     public function model(array $row): Model|array|null
     {
         // 0. Siapkan keyword pencarian kolom (bisa dari setting supplier atau default)
-        $nameKw = !empty($this->mapping['name_keywords']) ? array_map('trim', explode(',', $this->mapping['name_keywords'])) : ['nama', 'obat', 'produk', 'item', 'name', 'deskripsi'];
-        $unitKw = !empty($this->mapping['unit_keywords']) ? array_map('trim', explode(',', $this->mapping['unit_keywords'])) : ['satuan', 'unit', 'kemasan', 'box', 'kemas', 'bentuk'];
-        $priceKw = !empty($this->mapping['price_keywords']) ? array_map('trim', explode(',', $this->mapping['price_keywords'])) : ['grosir', 'harga', 'price', 'hrg', 'modal', 'hpp', 'hna'];
-        $discKw = !empty($this->mapping['discount_keywords']) ? array_map('trim', explode(',', $this->mapping['discount_keywords'])) : ['diskon', 'discount', 'disc', 'potongan'];
+        $nameKw = ! empty($this->mapping['name_keywords']) ? array_map('trim', explode(',', $this->mapping['name_keywords'])) : ['nama', 'obat', 'produk', 'item', 'name', 'deskripsi'];
+        $unitKw = ! empty($this->mapping['unit_keywords']) ? array_map('trim', explode(',', $this->mapping['unit_keywords'])) : ['satuan', 'unit', 'kemasan', 'box', 'kemas', 'bentuk'];
+        $priceKw = ! empty($this->mapping['price_keywords']) ? array_map('trim', explode(',', $this->mapping['price_keywords'])) : ['grosir', 'harga', 'price', 'hrg', 'modal', 'hpp', 'hna'];
+        $discKw = ! empty($this->mapping['discount_keywords']) ? array_map('trim', explode(',', $this->mapping['discount_keywords'])) : ['diskon', 'discount', 'disc', 'potongan'];
 
         // Deteksi kolom secara dinamis
         $name = $this->findValue($row, $nameKw);

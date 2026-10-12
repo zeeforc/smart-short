@@ -15,48 +15,31 @@ class OrderCalculationService
      */
     public function calculateBestSupplier(string $rawProductName, int $qty): ?array
     {
-        $normalizer = app(ProductNormalizationService::class);
-        $parsed = $normalizer->parseDrugName($rawProductName, '');
+        $matcher = app(DrugMatchingService::class);
+        $match = $matcher->match($rawProductName);
 
-        // 1. Cari kandidat produk yang cocok.
-        // Jika kekuatan obat ada di request defecta (misal: Amlodipine 5mg), wajib cocokkan nama + kekuatan.
-        // Jika defecta tidak mencantumkan kekuatan (misal: CENDO CATARLENT), cocokkan berdasarkan nama saja.
-        $query = NormalizedProduct::query();
-        if (! empty($parsed['strength'])) {
-            $query->where('parsed_name', $parsed['name'])
-                ->where('parsed_strength', $parsed['strength']);
-        } else {
-            $query->where('parsed_name', $parsed['name']);
+        if (! $match['product']) {
+            return [
+                'winner' => null,
+                'comparisons' => [],
+                'match_info' => $match,
+            ];
         }
 
-        $products = $query->get();
+        $matchedProduct = $match['product'];
 
-        // Fallback 1: cari lewat tabel alias yang dijodohkan manual sebelumnya
-        if ($products->isEmpty()) {
-            $alias = \App\Models\ProductAlias::where('alias_normalized', $parsed['canonical'])->first();
-            if (! $alias) {
-                $alias = \App\Models\ProductAlias::where('alias_raw', mb_strtolower(trim($rawProductName)))->first();
-            }
-
-            if ($alias && $alias->normalizedProduct) {
-                $products = collect([$alias->normalizedProduct]);
-            }
-        }
-
-        // Fallback 2: coba pencarian exact canonical jika tersedia
-        if ($products->isEmpty() && ! empty($parsed['canonical'])) {
-            $fallback = NormalizedProduct::where('normalized_name', $parsed['canonical'])->first();
-            if ($fallback) {
-                $products = collect([$fallback]);
-            }
-        }
+        // Ambil produk dan variannya jika ada (misal beda penulisan satuan Tablet/Strip)
+        $products = NormalizedProduct::query()
+            ->where('parsed_name', $matchedProduct->parsed_name)
+            ->when(! empty($matchedProduct->parsed_strength), function ($q) use ($matchedProduct) {
+                $q->where('parsed_strength', $matchedProduct->parsed_strength);
+            })
+            ->get();
 
         if ($products->isEmpty()) {
-            return null;
+            $products = collect([$matchedProduct]);
         }
 
-        // Kumpulkan semua penawaran supplier dari semua varian produk yang cocok
-        // (menghindari bug supplier terlewat karena perbedaan penulisan satuan Tablet/Strip/-)
         $supplierOffers = [];
         foreach ($products as $product) {
             $canonicalName = $product->normalized_name;
@@ -70,14 +53,19 @@ class OrderCalculationService
         }
 
         if (empty($supplierOffers)) {
-            return null;
+            return [
+                'winner' => null,
+                'comparisons' => [],
+                'match_info' => array_merge($match, [
+                    'reason' => 'Produk cocok, tetapi belum ada data harga dari supplier',
+                ]),
+            ];
         }
 
         $bestPrice = PHP_FLOAT_MAX;
         $bestSupplier = null;
         $allCalculations = [];
 
-        // Loop semua supplier yang punya harga untuk obat ini
         foreach ($supplierOffers as $offer) {
             $supplierId = $offer['supplier_id'];
             $basePrice = (float) $offer['price'];
@@ -88,14 +76,10 @@ class OrderCalculationService
                 continue;
             }
 
-            // 1. Cari Diskon (Cek Spesifik dulu, baru Global)
             $discountPct = $this->findDiscount($supplierId, $offer['canonical'], $qty);
-
-            // 2. Potong Diskon
             $netPrice = $basePrice * (1 - ($discountPct / 100));
 
-            // 3. Tambah PPN (12%) jika supplier belum include PPN
-            $ppnRate = 0.12; // 12% PPN 2026
+            $ppnRate = 0.12;
             $finalPrice = $supplier->is_ppn_included ? $netPrice : ($netPrice * (1 + $ppnRate));
 
             $result = [
@@ -119,12 +103,19 @@ class OrderCalculationService
         }
 
         if (! $bestSupplier) {
-            return null;
+            return [
+                'winner' => null,
+                'comparisons' => [],
+                'match_info' => array_merge($match, [
+                    'reason' => 'Tidak ada penawaran dari supplier aktif',
+                ]),
+            ];
         }
 
         return [
             'winner' => $bestSupplier,
             'comparisons' => collect($allCalculations)->sortBy('final_price')->values()->toArray(),
+            'match_info' => $match,
         ];
     }
 
@@ -154,6 +145,6 @@ class OrderCalculationService
             return (float) $globalDiscount->discount_pct;
         }
 
-        return 0; // Tidak ada diskon
+        return 0;
     }
 }

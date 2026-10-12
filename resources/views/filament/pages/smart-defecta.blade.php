@@ -4,11 +4,12 @@
     @if($calculationResults !== null)
         @php
             $totalItems   = count($calculationResults);
-            $foundItems   = collect($calculationResults)->filter(fn($r) => $r['calculation'])->count();
+            $foundItems   = collect($calculationResults)->filter(fn($r) => !empty($r['calculation']['winner']))->count();
             $missingItems = $totalItems - $foundItems;
             $grandTotal   = collect($calculationResults)
-                ->filter(fn($r) => $r['calculation'])
+                ->filter(fn($r) => !empty($r['calculation']['winner']))
                 ->sum(fn($r) => $r['calculation']['winner']['final_price'] * $r['request']['qty']);
+            $unmatchedList = collect($calculationResults)->filter(fn($r) => empty($r['calculation']['winner']))->values();
         @endphp
 
         <style>
@@ -35,6 +36,167 @@
             .sd-stat-value.success { color: #16a34a; }
             .sd-stat-value.warning { color: #d97706; }
             .sd-stat-value.money { font-size: 1rem; }
+
+            /* Alert Box for Unmatched Items */
+            .sd-alert-box {
+                background: #fffbeb;
+                border: 1px solid #fde68a;
+                border-radius: 0.875rem;
+                padding: 1.25rem 1.5rem;
+                margin-bottom: 1.75rem;
+            }
+            .dark .sd-alert-box {
+                background: rgba(245, 158, 11, 0.08);
+                border-color: rgba(245, 158, 11, 0.25);
+            }
+            .sd-alert-top {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 1rem;
+                margin-bottom: 0.875rem;
+            }
+            .sd-alert-title-wrap {
+                display: flex;
+                align-items: flex-start;
+                gap: 0.75rem;
+            }
+            .sd-alert-icon {
+                width: 1.35rem;
+                height: 1.35rem;
+                color: #d97706;
+                flex-shrink: 0;
+                margin-top: 0.125rem;
+            }
+            .dark .sd-alert-icon { color: #fbbf24; }
+            .sd-alert-heading {
+                font-size: 0.95rem;
+                font-weight: 700;
+                color: #92400e;
+                margin: 0;
+            }
+            .dark .sd-alert-heading { color: #fef3c7; }
+            .sd-alert-sub {
+                font-size: 0.775rem;
+                color: #b45309;
+                margin: 0.25rem 0 0 0;
+            }
+            .dark .sd-alert-sub { color: #fde68a; }
+            .sd-alert-items {
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .sd-alert-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                background: #ffffff;
+                border: 1px solid #fef3c7;
+                border-radius: 0.625rem;
+                padding: 0.625rem 1rem;
+            }
+            .dark .sd-alert-row {
+                background: rgba(31, 41, 55, 0.6);
+                border-color: rgba(245, 158, 11, 0.15);
+            }
+            .sd-alert-row-left {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+            .sd-alert-badge-num {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 1.35rem;
+                height: 1.35rem;
+                border-radius: 9999px;
+                background: #fde68a;
+                color: #78350f;
+                font-size: 0.7rem;
+                font-weight: 700;
+                flex-shrink: 0;
+            }
+            .dark .sd-alert-badge-num {
+                background: rgba(245, 158, 11, 0.25);
+                color: #fef3c7;
+            }
+            .sd-alert-drug {
+                font-size: 0.85rem;
+                font-weight: 700;
+                color: #1f2937;
+            }
+            .dark .sd-alert-drug { color: #f9fafb; }
+            .sd-alert-qty {
+                font-size: 0.75rem;
+                color: #6b7280;
+                margin-left: 0.25rem;
+            }
+            .sd-alert-sugg-text {
+                font-size: 0.725rem;
+                color: #047857;
+                margin-top: 0.15rem;
+            }
+            .dark .sd-alert-sugg-text { color: #34d399; }
+            .sd-alert-none-text {
+                font-size: 0.725rem;
+                color: #b45309;
+                margin-top: 0.15rem;
+            }
+            .dark .sd-alert-none-text { color: #fbbf24; }
+            .sd-alert-action-btn {
+                background: #f59e0b;
+                color: #ffffff;
+                font-size: 0.75rem;
+                font-weight: 600;
+                border: none;
+                border-radius: 0.5rem;
+                padding: 0.4rem 0.85rem;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: background 0.15s ease;
+            }
+            .sd-alert-action-btn:hover {
+                background: #d97706;
+            }
+
+            .sd-match-badge {
+                font-size: 0.65rem;
+                font-weight: 600;
+                border-radius: 0.25rem;
+                padding: 0.15rem 0.45rem;
+                margin-left: 0.5rem;
+                display: inline-block;
+                vertical-align: middle;
+            }
+            .sd-match-badge.auto {
+                background: #dcfce7;
+                color: #15803d;
+                border: 1px solid #bbf7d0;
+            }
+            .dark .sd-match-badge.auto {
+                background: rgba(22, 163, 74, 0.15);
+                color: #4ade80;
+                border-color: rgba(22, 163, 74, 0.3);
+            }
+            .sd-match-badge.alias {
+                background: #e0e7ff;
+                color: #4338ca;
+                border: 1px solid #c7d2fe;
+            }
+            .dark .sd-match-badge.alias {
+                background: rgba(79, 70, 229, 0.15);
+                color: #818cf8;
+                border-color: rgba(79, 70, 229, 0.3);
+            }
+            .sd-sugg-inline {
+                font-size: 0.7rem;
+                color: #059669;
+            }
+            .dark .sd-sugg-inline { color: #34d399; }
 
             /* Result card */
             .sd-card {
@@ -204,36 +366,112 @@
                 </div>
             </div>
 
+            {{-- Alert Banner: Rincian Obat yang Perlu Dicocokkan Manual --}}
+            @if($missingItems > 0)
+                <div class="sd-alert-box">
+                    <div class="sd-alert-top">
+                        <div class="sd-alert-title-wrap">
+                            <svg class="sd-alert-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+                            </svg>
+                            <div>
+                                <h4 class="sd-alert-heading">Perlu Perhatian: {{ $missingItems }} Obat Belum Terhubung ke Pricelist</h4>
+                                <p class="sd-alert-sub">Obat berikut belum lolos pencocokan otomatis 100% dan butuh konfirmasi jodohkan manual:</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sd-alert-items">
+                        @foreach($unmatchedList as $unmatched)
+                            @php
+                                $uName = $unmatched['request']['product_name'];
+                                $uQty = $unmatched['request']['qty'];
+                                $uInfo = $unmatched['calculation']['match_info'] ?? null;
+                                $topSugg = $uInfo['suggestions'][0] ?? null;
+                            @endphp
+                            <div class="sd-alert-row">
+                                <div class="sd-alert-row-left">
+                                    <span class="sd-alert-badge-num">{{ $loop->iteration }}</span>
+                                    <div>
+                                        <span class="sd-alert-drug">{{ $uName }}</span>
+                                        <span class="sd-alert-qty">({{ $uQty }} item)</span>
+                                        @if($topSugg)
+                                            <div class="sd-alert-sugg-text">
+                                                💡 Rekomendasi terdekat: <strong>{{ $topSugg['name'] }}</strong> (Akurasi: {{ round($topSugg['confidence']) }}%)
+                                            </div>
+                                        @else
+                                            <div class="sd-alert-none-text">
+                                                {{ $uInfo['reason'] ?? 'Tidak ditemukan di pricelist supplier manapun' }}
+                                            </div>
+                                        @endif
+                                    </div>
+                                </div>
+                                <button 
+                                    type="button"
+                                    wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ $topSugg['product']['id'] ?? '' }}' })"
+                                    class="sd-alert-action-btn"
+                                >
+                                    Jodohkan Manual
+                                </button>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+
             {{-- Cards --}}
             @foreach($calculationResults as $index => $res)
-                @php $calc = $res['calculation']; @endphp
-                <div class="sd-card {{ $calc ? '' : 'missing' }}" x-show="isVisible({{ $index }})">
+                @php 
+                    $calc = $res['calculation']; 
+                    $hasWinner = !empty($calc['winner']);
+                @endphp
+                <div class="sd-card {{ $hasWinner ? '' : 'missing' }}" x-show="isVisible({{ $index }})">
                     <div class="sd-card-header">
                         <div>
-                            <div class="sd-drug-name">{{ $res['request']['product_name'] }}</div>
+                            <div class="sd-drug-name">
+                                {{ $res['request']['product_name'] }}
+                                @if($hasWinner && !empty($calc['match_info']))
+                                    @php $mStatus = $calc['match_info']['status'] ?? ''; @endphp
+                                    @if($mStatus === 'auto_matched')
+                                        <span class="sd-match-badge auto" title="Dicocokkan otomatis oleh sistem">⚡ Auto-Matched ({{ round($calc['match_info']['confidence']) }}%)</span>
+                                    @elseif($mStatus === 'alias')
+                                        <span class="sd-match-badge alias" title="Tersimpan di Kamus Alias">Kamus Alias</span>
+                                    @endif
+                                @endif
+                            </div>
                             <div class="sd-drug-qty">Jumlah dipesan: <b>{{ $res['request']['qty'] }} item</b></div>
                         </div>
-                        @if($calc)
+                        @if($hasWinner)
                             <div>
                                 <div class="sd-total-label">Total harga</div>
                                 <div class="sd-total-value">Rp {{ number_format($calc['winner']['final_price'] * $res['request']['qty'], 0, ',', '.') }}</div>
                             </div>
                         @else
-                            <button 
-                                wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}' })"
-                                class="sd-badge-missing"
-                                style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
-                                title="Klik untuk mencocokkan obat secara manual"
-                            >
-                                <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-                                </svg>
-                                Belum Ada Pricelist (Jodohkan)
-                            </button>
+                            @php
+                                $mInfo = $calc['match_info'] ?? null;
+                                $topSugg = $mInfo['suggestions'][0] ?? null;
+                            @endphp
+                            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
+                                @if($topSugg)
+                                    <div class="sd-sugg-inline">
+                                        Saran: <b>{{ $topSugg['name'] }}</b> ({{ round($topSugg['confidence']) }}%)
+                                    </div>
+                                @endif
+                                <button 
+                                    wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $topSugg['product']['id'] ?? '' }}' })"
+                                    class="sd-badge-missing"
+                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
+                                    title="Klik untuk mencocokkan obat secara manual"
+                                >
+                                    <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                    </svg>
+                                    Jodohkan Manual
+                                </button>
+                            </div>
                         @endif
                     </div>
 
-                    @if($calc)
+                    @if($hasWinner)
                         <div class="sd-card-body">
                             {{-- Winner --}}
                             <div class="sd-winner">

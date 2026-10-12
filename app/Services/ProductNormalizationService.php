@@ -41,10 +41,10 @@ class ProductNormalizationService
 
         // Standarisasi angka desimal koma ke titik (12,5 -> 12.5)
         $s = preg_replace('/(\d+),(\d+)/', '$1.$2', $s);
-        
+
         // Hapus spasi antara angka dan satuan (400 MG -> 400MG)
         $s = preg_replace('/(\d)\s*(mg|mcg|gr|gm|ml|g|iu|cc|%)\b/i', '$1$2', $s);
-        
+
         $s = trim(preg_replace('/\s+/', ' ', $s));
 
         // Bersihkan tanda kurung kemasan spt (besar), (kecil), (box), (strip), (nr)
@@ -73,37 +73,37 @@ class ProductNormalizationService
         $s = trim(preg_replace('/\s+/', ' ', $s));
 
         $synonyms = [
-            'TABLET'=>'TAB','KAPLET'=>'KAP','KAPL'=>'KAP','KPT'=>'KAP','KAPS'=>'KAP',
-            'KAPSUL'=>'KAP','CAPS'=>'KAP','CAP'=>'KAP',
-            'SYRUP'=>'SYR','SIRUP'=>'SYR','SUSPENSI'=>'SYR','SUSP'=>'SYR',
-            'CREAM'=>'CR','KRIM'=>'CR','SALEP'=>'OINT',
-            'INJEKSI'=>'INJ','TETES'=>'DROP','DROPS'=>'DROP','TTS'=>'DROP',
-            'GRAM'=>'GR','GM'=>'GR','G'=>'GR',
-            'METILPREDNISOLON'=>'METHYLPREDNISOLONE',
-            'ACETYLSISTEIN'=>'ACETYLCYSTEINE','ACETYLCYSTEIN'=>'ACETYLCYSTEINE',
+            'TABLET' => 'TAB', 'KAPLET' => 'KAP', 'KAPL' => 'KAP', 'KPT' => 'KAP', 'KAPS' => 'KAP',
+            'KAPSUL' => 'KAP', 'CAPS' => 'KAP', 'CAP' => 'KAP',
+            'SYRUP' => 'SYR', 'SIRUP' => 'SYR', 'SUSPENSI' => 'SYR', 'SUSP' => 'SYR',
+            'CREAM' => 'CR', 'KRIM' => 'CR', 'SALEP' => 'OINT',
+            'INJEKSI' => 'INJ', 'TETES' => 'DROP', 'DROPS' => 'DROP', 'TTS' => 'DROP',
+            'GRAM' => 'GR', 'GM' => 'GR', 'G' => 'GR',
+            'METILPREDNISOLON' => 'METHYLPREDNISOLONE',
+            'ACETYLSISTEIN' => 'ACETYLCYSTEINE', 'ACETYLCYSTEIN' => 'ACETYLCYSTEINE',
         ];
 
         $noise = [
-            'NORET','NORETUR','NRT','NR','RETUR','NO','NEW',
-            'STRIP','BLISTER','BOX','BOTOL','BTL','FLS','TUBE','POT','VIAL','AMP',
-            'E.D','ED','TM','TT',
+            'NORET', 'NORETUR', 'NRT', 'NR', 'RETUR', 'NO', 'NEW',
+            'STRIP', 'BLISTER', 'BOX', 'BOTOL', 'BTL', 'FLS', 'TUBE', 'POT', 'VIAL', 'AMP',
+            'E.D', 'ED', 'TM', 'TT',
         ];
 
         $words = explode(' ', $s);
         $finalWords = [];
         foreach ($words as $word) {
             $upper = strtoupper($word);
-            
+
             // Filter noise
             if (in_array($upper, $noise, true)) {
                 continue;
             }
-            
+
             // Hapus ukuran box seperti 10x10, 5x10
             if (preg_match('/^\d+\s*x\s*\d+$/i', $word)) {
                 continue;
             }
-            
+
             // Map synonym
             if (isset($synonyms[$upper])) {
                 $finalWords[] = strtolower($synonyms[$upper]);

@@ -2,11 +2,20 @@
 
 namespace App\Filament\Pages;
 
+use App\Exports\SmartDefectaExport;
+use App\Imports\SmartDefectaImport;
 use App\Models\DefectaItem;
+use App\Models\NormalizedProduct;
+use App\Models\ProductAlias;
 use App\Services\OrderCalculationService;
+use App\Services\ProductNormalizationService;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
+use Filament\Actions\BulkActionGroup;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -65,18 +74,18 @@ class SmartDefecta extends Page implements HasTable
                         ->acceptedFileTypes([
                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                             'application/vnd.ms-excel',
-                            'text/csv'
+                            'text/csv',
                         ])
                         ->required(),
                 ])
                 ->action(function (array $data) {
                     $filePath = Storage::disk('local')->path($data['file']);
-                    
-                    $import = new \App\Imports\SmartDefectaImport();
+
+                    $import = new SmartDefectaImport;
                     Excel::import($import, $filePath);
 
                     $validItems = collect($import->data)->filter(function ($item) {
-                        return !empty($item['product_name']);
+                        return ! empty($item['product_name']);
                     })->values()->toArray();
 
                     if (count($validItems) > 0) {
@@ -88,18 +97,18 @@ class SmartDefecta extends Page implements HasTable
                             ]);
                         }
 
-                        \Filament\Notifications\Notification::make()
-                            ->title('Berhasil import ' . count($validItems) . ' obat dari Excel')
+                        Notification::make()
+                            ->title('Berhasil import '.count($validItems).' obat dari Excel')
                             ->success()
                             ->send();
                     } else {
-                        \Filament\Notifications\Notification::make()
+                        Notification::make()
                             ->title('Gagal import, format tidak sesuai atau kosong')
                             ->danger()
                             ->send();
                     }
                 }),
-                
+
             Action::make('clear_cart')
                 ->label('Kosongkan Daftar')
                 ->icon('heroicon-m-trash')
@@ -108,7 +117,7 @@ class SmartDefecta extends Page implements HasTable
                 ->action(function () {
                     DefectaItem::where('user_id', auth()->id())->delete();
                     $this->calculationResults = null;
-                    \Filament\Notifications\Notification::make()
+                    Notification::make()
                         ->title('Daftar belanja berhasil dikosongkan')
                         ->success()
                         ->send();
@@ -163,13 +172,13 @@ class SmartDefecta extends Page implements HasTable
                     ->action(fn ($record) => $record->delete()),
             ])
             ->bulkActions([
-                \Filament\Actions\BulkActionGroup::make([
-                    \Filament\Actions\BulkAction::make('delete')
+                BulkActionGroup::make([
+                    BulkAction::make('delete')
                         ->label('Delete')
                         ->icon('heroicon-m-trash')
                         ->color('danger')
                         ->requiresConfirmation()
-                        ->action(fn (\Illuminate\Database\Eloquent\Collection $records) => $records->each->delete()),
+                        ->action(fn (Collection $records) => $records->each->delete()),
                 ]),
             ])
             ->emptyStateHeading('Keranjang masih kosong')
@@ -179,12 +188,13 @@ class SmartDefecta extends Page implements HasTable
     public function calculate()
     {
         $items = DefectaItem::where('user_id', auth()->id())->get();
-        
+
         if ($items->isEmpty()) {
-            \Filament\Notifications\Notification::make()
+            Notification::make()
                 ->title('Keranjang belanja kosong')
                 ->warning()
                 ->send();
+
             return;
         }
 
@@ -204,26 +214,41 @@ class SmartDefecta extends Page implements HasTable
         }
 
         $this->calculationResults = $results;
-        
-        \Filament\Notifications\Notification::make()
-            ->title('Kalkulasi berhasil')
-            ->success()
-            ->send();
+
+        $totalItems = count($results);
+        $foundCount = collect($results)->filter(fn ($r) => ! empty($r['calculation']['winner']))->count();
+        $missingCount = $totalItems - $foundCount;
+        $autoCount = collect($results)->filter(fn ($r) => ($r['calculation']['match_info']['status'] ?? '') === 'auto_matched')->count();
+
+        if ($missingCount > 0) {
+            Notification::make()
+                ->title("Kalkulasi selesai: {$foundCount} obat cocok, {$missingCount} butuh dicocokkan")
+                ->body($autoCount > 0 ? "⚡ {$autoCount} obat berhasil dicocokkan otomatis oleh sistem." : null)
+                ->warning()
+                ->send();
+        } else {
+            Notification::make()
+                ->title("Kalkulasi berhasil: Semua ({$foundCount}) obat terhubung!")
+                ->body($autoCount > 0 ? "⚡ {$autoCount} obat dicocokkan secara otomatis." : null)
+                ->success()
+                ->send();
+        }
     }
 
     public function exportToExcel()
     {
         if (empty($this->calculationResults)) {
-            \Filament\Notifications\Notification::make()
+            Notification::make()
                 ->title('Belum ada hasil kalkulasi yang bisa di-download')
                 ->warning()
                 ->send();
+
             return;
         }
 
         return Excel::download(
-            new \App\Exports\SmartDefectaExport($this->calculationResults),
-            'SP_Defecta_' . date('Ymd_His') . '.xlsx'
+            new SmartDefectaExport($this->calculationResults),
+            'SP_Defecta_'.date('Ymd_His').'.xlsx'
         );
     }
 
@@ -232,42 +257,46 @@ class SmartDefecta extends Page implements HasTable
         return Action::make('jodohkan')
             ->label('Jodohkan Manual Obat')
             ->form([
-                \Filament\Forms\Components\TextInput::make('raw_name')
+                TextInput::make('raw_name')
                     ->label('Nama Asli di Defecta')
                     ->disabled(),
-                \Filament\Forms\Components\Select::make('normalized_product_id')
+                Select::make('normalized_product_id')
                     ->label('Pilih Obat Asli')
                     ->options(function () {
-                        return \App\Models\NormalizedProduct::query()
+                        return NormalizedProduct::query()
                             ->selectRaw("id, concat(parsed_name, ' ', ifnull(parsed_strength, '')) as full_name")
                             ->pluck('full_name', 'id');
                     })
                     ->searchable()
-                    ->required(),
+                    ->required()
+                    ->helperText('Pilih master produk yang sesuai. Rekomendasi terdekat otomatis dipilih jika tersedia.'),
             ])
             ->fillForm(function (array $arguments) {
                 return [
                     'raw_name' => $arguments['raw_name'] ?? '',
+                    'normalized_product_id' => ! empty($arguments['suggested_id']) ? (int) $arguments['suggested_id'] : null,
                 ];
             })
             ->action(function (array $data, array $arguments) {
                 $rawName = $arguments['raw_name'] ?? '';
-                if (!$rawName) return;
+                if (! $rawName) {
+                    return;
+                }
 
-                $normalizer = app(\App\Services\ProductNormalizationService::class);
+                $normalizer = app(ProductNormalizationService::class);
                 $parsed = $normalizer->parseDrugName($rawName, '');
-                
-                \App\Models\ProductAlias::updateOrCreate(
+
+                ProductAlias::updateOrCreate(
                     [
                         'alias_normalized' => $parsed['canonical'],
                     ],
                     [
                         'alias_raw' => $rawName,
-                        'normalized_product_id' => $data['normalized_product_id']
+                        'normalized_product_id' => $data['normalized_product_id'],
                     ]
                 );
-                
-                \Filament\Notifications\Notification::make()
+
+                Notification::make()
                     ->title('Berhasil dijodohkan! Data akan dikalkulasi ulang.')
                     ->success()
                     ->send();

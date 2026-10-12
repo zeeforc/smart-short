@@ -4,26 +4,26 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\ProductAliasResource\Pages;
 use App\Models\ProductAlias;
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\EditAction;
 use Filament\Forms;
-use Filament\Schemas\Schema;
 use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Filament\Actions\EditAction;
-use Filament\Actions\DeleteAction;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 
 class ProductAliasResource extends Resource
 {
     protected static ?string $model = ProductAlias::class;
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-arrows-right-left';
-    
+
     protected static ?string $navigationLabel = 'Alias & Jodohkan Obat';
-    
+
     protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
-    
+
     protected static ?string $pluralModelLabel = 'Alias Obat';
 
     public static function form(Schema $schema): Schema
