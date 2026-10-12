@@ -4,7 +4,9 @@ namespace Tests\Unit;
 
 use App\Models\NormalizedProduct;
 use App\Models\ProductAlias;
+use App\Models\Supplier;
 use App\Services\DrugMatchingService;
+use App\Services\OrderCalculationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -263,5 +265,99 @@ class DrugMatchingTest extends TestCase
         $this->assertNotEmpty($res['suggestions']);
         $this->assertGreaterThanOrEqual(75.0, $res['suggestions'][0]['confidence']);
         $this->assertStringContainsString('ALERHIS', $res['suggestions'][0]['name']);
+    }
+
+    public function test_are_equivalent_detects_same_drug_with_different_supplier_naming(): void
+    {
+        $p1 = NormalizedProduct::create([
+            'normalized_name' => "AMPICILLIN 'NOVA'/100|500MG|KAP",
+            'parsed_name' => "AMPICILLIN 'NOVA'/100",
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'KAP',
+            'lowest_price' => 45000,
+        ]);
+
+        $p2 = NormalizedProduct::create([
+            'normalized_name' => 'AMPICILLIN GEN. NOVA NOVAPHARIN|500MG|TAB',
+            'parsed_name' => 'AMPICILLIN GEN. NOVA NOVAPHARIN',
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 38000,
+        ]);
+
+        $pOther = NormalizedProduct::create([
+            'normalized_name' => 'AMPICILLIN GEN. SELES SELES|500MG|TAB',
+            'parsed_name' => 'AMPICILLIN GEN. SELES SELES',
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 36000,
+        ]);
+
+        $this->assertTrue($this->matcher->areEquivalent($p1, $p2));
+        $this->assertFalse($this->matcher->areEquivalent($p1, $pOther));
+    }
+
+    public function test_order_calculation_pools_different_supplier_variants(): void
+    {
+        $supA = Supplier::create([
+            'name' => 'PBF DISTRIBUTOR A',
+            'is_active' => true,
+            'is_ppn_included' => true,
+        ]);
+
+        $supB = Supplier::create([
+            'name' => 'PBF DISTRIBUTOR B',
+            'is_active' => true,
+            'is_ppn_included' => true,
+        ]);
+
+        $p1 = NormalizedProduct::create([
+            'normalized_name' => "AMPICILLIN 'NOVA'/100|500MG|KAP",
+            'parsed_name' => "AMPICILLIN 'NOVA'/100",
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'KAP',
+            'lowest_price' => 45000,
+            'price_history_json' => [
+                [
+                    'supplier_id' => $supA->id,
+                    'raw_name' => "AMPICILLIN 'NOVA'/100 500MG",
+                    'price' => 45000,
+                    'unit' => 'BOX',
+                ],
+            ],
+        ]);
+
+        $p2 = NormalizedProduct::create([
+            'normalized_name' => 'AMPICILLIN GEN. NOVA NOVAPHARIN|500MG|TAB',
+            'parsed_name' => 'AMPICILLIN GEN. NOVA NOVAPHARIN',
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 38000,
+            'price_history_json' => [
+                [
+                    'supplier_id' => $supB->id,
+                    'raw_name' => 'AMPICILLIN GEN. NOVA NOVAPHARIN 500MG',
+                    'price' => 38000,
+                    'unit' => 'BOX',
+                ],
+            ],
+        ]);
+
+        // Jodohkan manual defecta ke P1
+        ProductAlias::create([
+            'alias_raw' => 'AMPICILIN 500 MG TAB NOVA',
+            'alias_normalized' => 'AMPICILIN TAB NOVA|500MG|',
+            'normalized_product_id' => $p1->id,
+            'status' => 'matched',
+        ]);
+
+        $calcService = app(OrderCalculationService::class);
+        $result = $calcService->calculateBestSupplier('AMPICILIN 500 MG TAB NOVA', 1);
+
+        // Kedua supplier harus terdeteksi dan Supplier B (Rp 38.000) yang harus menang!
+        $this->assertNotNull($result['winner']);
+        $this->assertEquals($supB->id, $result['winner']['supplier_id']);
+        $this->assertEquals(38000.0, $result['winner']['base_price']);
+        $this->assertCount(2, $result['comparisons']);
     }
 }

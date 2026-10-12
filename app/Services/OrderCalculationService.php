@@ -6,6 +6,7 @@ use App\Models\NormalizedProduct;
 use App\Models\ProductDiscountTier;
 use App\Models\Supplier;
 use App\Models\SupplierDiscountTier;
+use Illuminate\Support\Collection;
 
 class OrderCalculationService
 {
@@ -46,17 +47,8 @@ class OrderCalculationService
 
         $matchedProduct = $match['product'];
 
-        // Ambil produk dan variannya jika ada (misal beda penulisan satuan Tablet/Strip)
-        $products = NormalizedProduct::query()
-            ->where('parsed_name', $matchedProduct->parsed_name)
-            ->when(! empty($matchedProduct->parsed_strength), function ($q) use ($matchedProduct) {
-                $q->where('parsed_strength', $matchedProduct->parsed_strength);
-            })
-            ->get();
-
-        if ($products->isEmpty()) {
-            $products = collect([$matchedProduct]);
-        }
+        // Ambil produk dan semua variannya dari berbagai supplier (multi-master pooling)
+        $products = $this->findEquivalentProducts($matchedProduct, $rawProductName);
 
         $supplierOffers = [];
         foreach ($products as $product) {
@@ -164,5 +156,52 @@ class OrderCalculationService
         }
 
         return 0;
+    }
+
+    /**
+     * Cari semua produk master yang setara / varian dari produk yang cocok
+     * untuk mengumpulkan penawaran harga dari semua supplier (multi-master pooling).
+     */
+    protected function findEquivalentProducts(NormalizedProduct $matchedProduct, ?string $rawProductName = null): Collection
+    {
+        $products = collect([$matchedProduct]);
+        $matcher = app(DrugMatchingService::class);
+
+        // 1. Ambil produk dengan parsed_name yang sama persis
+        $query = NormalizedProduct::query()
+            ->where('parsed_name', $matchedProduct->parsed_name);
+
+        if (! empty($matchedProduct->parsed_strength)) {
+            $query->where('parsed_strength', $matchedProduct->parsed_strength);
+        } else {
+            $query->whereNull('parsed_strength');
+        }
+
+        $sameName = $query->get();
+        $products = $products->merge($sameName);
+
+        // 2. Cari varian dari supplier lain yang setara (misal 'AMPICILLIN NOVA/100' vs 'AMPICILLIN GEN. NOVA NOVAPHARIN')
+        $firstWord = explode(' ', trim($matchedProduct->parsed_name))[0] ?? '';
+        if (mb_strlen($firstWord) >= 3) {
+            $candQuery = NormalizedProduct::query()
+                ->where('id', '!=', $matchedProduct->id)
+                ->where('parsed_name', 'like', mb_substr($firstWord, 0, 4).'%');
+
+            if (! empty($matchedProduct->parsed_strength)) {
+                $candQuery->where('parsed_strength', $matchedProduct->parsed_strength);
+            } else {
+                $candQuery->whereNull('parsed_strength');
+            }
+
+            $candidates = $candQuery->limit(50)->get();
+
+            foreach ($candidates as $candidate) {
+                if ($matcher->areEquivalent($matchedProduct, $candidate)) {
+                    $products->push($candidate);
+                }
+            }
+        }
+
+        return $products->unique('id')->values();
     }
 }

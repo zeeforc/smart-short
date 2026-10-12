@@ -348,6 +348,74 @@ class DrugMatchingService
     }
 
     /**
+     * Memeriksa apakah dua produk master NormalizedProduct adalah obat yang setara
+     * (Zat aktif/brand sama, dosis sama, rute sediaan sama, dan pabrikan sama jika tercantum)
+     */
+    public function areEquivalent(NormalizedProduct $p1, NormalizedProduct $p2): bool
+    {
+        // 1. Dosis wajib identik
+        $str1 = $p1->parsed_strength ? strtoupper(trim($p1->parsed_strength)) : null;
+        $str2 = $p2->parsed_strength ? strtoupper(trim($p2->parsed_strength)) : null;
+        if ($str1 !== $str2) {
+            return false;
+        }
+
+        // 2. Kategori bentuk sediaan wajib sama
+        $cat1 = $this->getDosageCategory((string) $p1->parsed_name, $p1->parsed_form);
+        $cat2 = $this->getDosageCategory((string) $p2->parsed_name, $p2->parsed_form);
+        if ($cat1 !== null && $cat2 !== null && $cat1 !== $cat2) {
+            return false;
+        }
+
+        // 3. Ekstrak token signifikan
+        $toks1 = array_values(array_filter(
+            $this->extractTokens((string) $p1->parsed_name),
+            fn ($t) => $this->isSignificantToken($t)
+        ));
+        $toks2 = array_values(array_filter(
+            $this->extractTokens((string) $p2->parsed_name),
+            fn ($t) => $this->isSignificantToken($t)
+        ));
+
+        if (empty($toks1) || empty($toks2)) {
+            return false;
+        }
+
+        // Brand / Zat aktif utama wajib cocok
+        $brand1 = $toks1[0];
+        $brand2 = $toks2[0];
+        $brandMatch = ($brand1 === $brand2)
+            || (mb_strlen($brand1) >= 5 && mb_strlen($brand2) >= 5 && levenshtein($brand1, $brand2) <= 1);
+
+        if (! $brandMatch) {
+            return false;
+        }
+
+        // Jika salah satu produk mencantumkan pabrikan/kualifikasi spesifik (misal NOVA, BALATIF, DEXA, IFARS, SELES),
+        // maka produk lain wajib mengandung kualifikasi yang cocok
+        $qualifiers1 = array_slice($toks1, 1);
+        $qualifiers2 = array_slice($toks2, 1);
+
+        if (! empty($qualifiers1) && ! empty($qualifiers2)) {
+            $hasCommonQualifier = false;
+            foreach ($qualifiers1 as $q1) {
+                foreach ($qualifiers2 as $q2) {
+                    if ($q1 === $q2 || str_starts_with($q2, $q1) || str_starts_with($q1, $q2)) {
+                        $hasCommonQualifier = true;
+                        break 2;
+                    }
+                }
+            }
+
+            if (! $hasCommonQualifier) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Guard Kategori Bentuk Sediaan: Mencegah tablet tertukar dengan salep mata, sirup, dll.
      */
     protected function getDosageCategory(string $name, ?string $form): ?string
