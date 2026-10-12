@@ -36,17 +36,41 @@ class DrugMatchingService
             ->orWhere('alias_raw', $cleanRaw)
             ->first();
 
-        if ($alias && $alias->normalizedProduct) {
-            $product = $alias->normalizedProduct;
+        if ($alias) {
+            if ($alias->status === 'not_stocked') {
+                return [
+                    'status' => 'not_stocked',
+                    'product' => null,
+                    'confidence' => 100.0,
+                    'matched_name' => 'Bukan Stok PBF (Belanja Mandiri)',
+                    'suggestions' => [],
+                    'reason' => 'Ditandai sebagai belanja mandiri / non-PBF',
+                ];
+            }
 
-            return [
-                'status' => 'alias',
-                'product' => $product,
-                'confidence' => 100.0,
-                'matched_name' => trim("{$product->parsed_name} {$product->parsed_strength}"),
-                'suggestions' => [],
-                'reason' => null,
-            ];
+            if ($alias->status === 'unlisted') {
+                return [
+                    'status' => 'unlisted',
+                    'product' => null,
+                    'confidence' => 100.0,
+                    'matched_name' => 'Belum Ada di PBF Rekanan',
+                    'suggestions' => [],
+                    'reason' => 'Obat belum tersedia di pricelist distributor rekanan manapun',
+                ];
+            }
+
+            if ($alias->normalizedProduct) {
+                $product = $alias->normalizedProduct;
+
+                return [
+                    'status' => 'alias',
+                    'product' => $product,
+                    'confidence' => 100.0,
+                    'matched_name' => trim("{$product->parsed_name} {$product->parsed_strength}"),
+                    'suggestions' => [],
+                    'reason' => null,
+                ];
+            }
         }
 
         // 2. Cek Exact Match (Nama + Kekuatan Dosis Terstruktur)
@@ -117,7 +141,8 @@ class DrugMatchingService
         $scoredCandidates = [];
         foreach ($candidates as $candidate) {
             $score = $this->calculateSimilarityScore($reqName, $reqTokens, $reqStrength, $reqForm, $candidate);
-            if ($score >= 40.0) {
+            // Ambang batas saran dinaikkan ke minimal 70% agar produk non-obat tidak dipaksakan cocok
+            if ($score >= 70.0) {
                 $scoredCandidates[] = [
                     'product' => $candidate,
                     'name' => trim("{$candidate->parsed_name} {$candidate->parsed_strength}"),
@@ -133,7 +158,7 @@ class DrugMatchingService
                 'confidence' => 0.0,
                 'matched_name' => null,
                 'suggestions' => [],
-                'reason' => 'Tidak ada produk dengan kemiripan yang cukup',
+                'reason' => 'Tidak ada produk dengan kemiripan yang cukup (di bawah 70%)',
             ];
         }
 

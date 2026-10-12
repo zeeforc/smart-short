@@ -38,11 +38,20 @@ class ProductAliasResource extends Resource
                     ->label('Nama Terekstrak (Normalized)')
                     ->required()
                     ->maxLength(255),
+                Forms\Components\Select::make('status')
+                    ->label('Status Produk')
+                    ->options([
+                        'matched' => 'Dijodohkan ke Obat PBF',
+                        'not_stocked' => 'Bukan Stok PBF (Belanja Mandiri)',
+                        'unlisted' => 'Obat Belum Dijual PBF Rekanan',
+                    ])
+                    ->default('matched')
+                    ->required(),
                 Forms\Components\Select::make('normalized_product_id')
                     ->label('Produk Asli di Sistem')
                     ->relationship('normalizedProduct', 'parsed_name')
                     ->searchable()
-                    ->required(),
+                    ->nullable(),
             ]);
     }
 
@@ -53,11 +62,22 @@ class ProductAliasResource extends Resource
                 Tables\Columns\TextColumn::make('alias_raw')
                     ->label('Ketikan Defecta')
                     ->searchable(),
-                Tables\Columns\TextColumn::make('alias_normalized')
-                    ->label('Token Bersih')
-                    ->searchable(),
+                Tables\Columns\TextColumn::make('status')
+                    ->label('Status')
+                    ->badge()
+                    ->colors([
+                        'success' => 'matched',
+                        'gray' => 'not_stocked',
+                        'warning' => 'unlisted',
+                    ])
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'not_stocked' => '🛒 Bukan Stok PBF',
+                        'unlisted' => '📦 Belum Dijual PBF',
+                        default => '✅ Cocok ke PBF',
+                    }),
                 Tables\Columns\TextColumn::make('normalizedProduct.parsed_name')
                     ->label('Dijodohkan Ke')
+                    ->placeholder('-')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()

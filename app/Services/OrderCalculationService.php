@@ -18,6 +18,24 @@ class OrderCalculationService
         $matcher = app(DrugMatchingService::class);
         $match = $matcher->match($rawProductName);
 
+        if ($match['status'] === 'not_stocked') {
+            return [
+                'winner' => [
+                    'supplier_id' => 0,
+                    'supplier_name' => 'BELANJA MANDIRI / NON-PBF',
+                    'base_price' => 0,
+                    'discount_pct' => 0,
+                    'net_price' => 0,
+                    'is_ppn_included' => true,
+                    'final_price' => 0,
+                    'raw_name' => $rawProductName,
+                    'unit' => '-',
+                ],
+                'comparisons' => [],
+                'match_info' => $match,
+            ];
+        }
+
         if (! $match['product']) {
             return [
                 'winner' => null,

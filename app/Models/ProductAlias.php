@@ -9,6 +9,7 @@ class ProductAlias extends Model
 {
     protected $fillable = [
         'normalized_product_id',
+        'status',
         'alias_raw',
         'alias_normalized',
     ];

@@ -5,11 +5,17 @@
         @php
             $totalItems   = count($calculationResults);
             $foundItems   = collect($calculationResults)->filter(fn($r) => !empty($r['calculation']['winner']))->count();
-            $missingItems = $totalItems - $foundItems;
+            
+            // Item yang butuh perhatian manual: item tanpa pemenang, KECUALI yang sudah ditandai 'unlisted'
+            $unmatchedList = collect($calculationResults)->filter(function($r) {
+                $status = $r['calculation']['match_info']['status'] ?? '';
+                return empty($r['calculation']['winner']) && $status !== 'unlisted';
+            })->values();
+            
+            $missingItems = $unmatchedList->count();
             $grandTotal   = collect($calculationResults)
                 ->filter(fn($r) => !empty($r['calculation']['winner']))
                 ->sum(fn($r) => $r['calculation']['winner']['final_price'] * $r['request']['qty']);
-            $unmatchedList = collect($calculationResults)->filter(fn($r) => empty($r['calculation']['winner']))->values();
         @endphp
 
         <style>
@@ -159,9 +165,26 @@
                 white-space: nowrap;
                 transition: background 0.15s ease;
             }
-            .sd-alert-action-btn:hover {
-                background: #d97706;
+            .sd-alert-action-btn:hover { background: #d97706; }
+            .sd-alert-btn-nonpbf {
+                background: #f3f4f6;
+                color: #374151;
+                font-size: 0.725rem;
+                font-weight: 600;
+                border: 1px solid #d1d5db;
+                border-radius: 0.5rem;
+                padding: 0.4rem 0.75rem;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: background 0.15s ease;
             }
+            .sd-alert-btn-nonpbf:hover { background: #e5e7eb; }
+            .dark .sd-alert-btn-nonpbf {
+                background: rgba(255, 255, 255, 0.08);
+                color: #e5e7eb;
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            .dark .sd-alert-btn-nonpbf:hover { background: rgba(255, 255, 255, 0.15); }
 
             .sd-match-badge {
                 font-size: 0.65rem;
@@ -191,6 +214,26 @@
                 background: rgba(79, 70, 229, 0.15);
                 color: #818cf8;
                 border-color: rgba(79, 70, 229, 0.3);
+            }
+            .sd-match-badge.nonpbf {
+                background: #f3f4f6;
+                color: #4b5563;
+                border: 1px solid #e5e7eb;
+            }
+            .dark .sd-match-badge.nonpbf {
+                background: rgba(255, 255, 255, 0.08);
+                color: #d1d5db;
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            .sd-match-badge.unlisted {
+                background: #fef3c7;
+                color: #92400e;
+                border: 1px solid #fde68a;
+            }
+            .dark .sd-match-badge.unlisted {
+                background: rgba(251, 191, 36, 0.1);
+                color: #fbbf24;
+                border-color: rgba(251, 191, 36, 0.3);
             }
             .sd-sugg-inline {
                 font-size: 0.7rem;
@@ -376,7 +419,7 @@
                             </svg>
                             <div>
                                 <h4 class="sd-alert-heading">Perlu Perhatian: {{ $missingItems }} Obat Belum Terhubung ke Pricelist</h4>
-                                <p class="sd-alert-sub">Obat berikut belum lolos pencocokan otomatis 100% dan butuh konfirmasi jodohkan manual:</p>
+                                <p class="sd-alert-sub">Obat berikut tidak lolos auto-match $\ge$ 85% dan butuh konfirmasi manual atau ditandai bukan stok PBF:</p>
                             </div>
                         </div>
                     </div>
@@ -394,7 +437,7 @@
                                     <div>
                                         <span class="sd-alert-drug">{{ $uName }}</span>
                                         <span class="sd-alert-qty">({{ $uQty }} item)</span>
-                                        @if($topSugg)
+                                        @if($topSugg && ($topSugg['confidence'] ?? 0) >= 70)
                                             <div class="sd-alert-sugg-text">
                                                 💡 Rekomendasi terdekat: <strong>{{ $topSugg['name'] }}</strong> (Akurasi: {{ round($topSugg['confidence']) }}%)
                                             </div>
@@ -405,13 +448,23 @@
                                         @endif
                                     </div>
                                 </div>
-                                <button 
-                                    type="button"
-                                    wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ $topSugg['product']['id'] ?? '' }}' })"
-                                    class="sd-alert-action-btn"
-                                >
-                                    Jodohkan Manual
-                                </button>
+                                <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;">
+                                    <button 
+                                        type="button"
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ ($topSugg && ($topSugg['confidence'] ?? 0) >= 70) ? ($topSugg['product']['id'] ?? '') : '' }}' })"
+                                        class="sd-alert-action-btn"
+                                    >
+                                        Jodohkan Manual
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        wire:click="mountAction('tandaiNonPbf', { raw_name: '{{ addslashes($uName) }}' })"
+                                        class="sd-alert-btn-nonpbf"
+                                        title="Tandai produk ini bukan dari distributor obat (swalayan / belanja mandiri)"
+                                    >
+                                        🛒 Bukan Stok PBF
+                                    </button>
+                                </div>
                             </div>
                         @endforeach
                     </div>
@@ -423,15 +476,20 @@
                 @php 
                     $calc = $res['calculation']; 
                     $hasWinner = !empty($calc['winner']);
+                    $isNonPbf = $hasWinner && (($calc['winner']['supplier_name'] ?? '') === 'BELANJA MANDIRI / NON-PBF');
                 @endphp
                 <div class="sd-card {{ $hasWinner ? '' : 'missing' }}" x-show="isVisible({{ $index }})">
                     <div class="sd-card-header">
                         <div>
                             <div class="sd-drug-name">
                                 {{ $res['request']['product_name'] }}
-                                @if($hasWinner && !empty($calc['match_info']))
+                                @if(!empty($calc['match_info']))
                                     @php $mStatus = $calc['match_info']['status'] ?? ''; @endphp
-                                    @if($mStatus === 'auto_matched')
+                                    @if($mStatus === 'not_stocked' || $isNonPbf)
+                                        <span class="sd-match-badge nonpbf">🛒 Belanja Mandiri (Non-PBF)</span>
+                                    @elseif($mStatus === 'unlisted')
+                                        <span class="sd-match-badge unlisted">📦 Belum Ada di PBF Rekanan</span>
+                                    @elseif($mStatus === 'auto_matched')
                                         <span class="sd-match-badge auto" title="Dicocokkan otomatis oleh sistem">⚡ Auto-Matched ({{ round($calc['match_info']['confidence']) }}%)</span>
                                     @elseif($mStatus === 'alias')
                                         <span class="sd-match-badge alias" title="Tersimpan di Kamus Alias">Kamus Alias</span>
@@ -441,87 +499,113 @@
                             <div class="sd-drug-qty">Jumlah dipesan: <b>{{ $res['request']['qty'] }} item</b></div>
                         </div>
                         @if($hasWinner)
-                            <div>
-                                <div class="sd-total-label">Total harga</div>
-                                <div class="sd-total-value">Rp {{ number_format($calc['winner']['final_price'] * $res['request']['qty'], 0, ',', '.') }}</div>
-                            </div>
+                            @if($isNonPbf)
+                                <div>
+                                    <div class="sd-total-label">Kategori</div>
+                                    <div class="sd-total-value" style="font-size: 0.85rem; color: #6b7280;">Beli Mandiri</div>
+                                </div>
+                            @else
+                                <div>
+                                    <div class="sd-total-label">Total harga</div>
+                                    <div class="sd-total-value">Rp {{ number_format($calc['winner']['final_price'] * $res['request']['qty'], 0, ',', '.') }}</div>
+                                </div>
+                            @endif
                         @else
                             @php
                                 $mInfo = $calc['match_info'] ?? null;
                                 $topSugg = $mInfo['suggestions'][0] ?? null;
+                                $hasValidSugg = $topSugg && (($topSugg['confidence'] ?? 0) >= 70);
                             @endphp
                             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
-                                @if($topSugg)
+                                @if($hasValidSugg)
                                     <div class="sd-sugg-inline">
                                         Saran: <b>{{ $topSugg['name'] }}</b> ({{ round($topSugg['confidence']) }}%)
                                     </div>
                                 @endif
-                                <button 
-                                    wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $topSugg['product']['id'] ?? '' }}' })"
-                                    class="sd-badge-missing"
-                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
-                                    title="Klik untuk mencocokkan obat secara manual"
-                                >
-                                    <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
-                                    </svg>
-                                    Jodohkan Manual
-                                </button>
+                                <div style="display: flex; align-items: center; gap: 0.35rem;">
+                                    <button 
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $hasValidSugg ? ($topSugg['product']['id'] ?? '') : '' }}' })"
+                                        class="sd-badge-missing"
+                                        style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
+                                        title="Klik untuk mencocokkan obat secara manual"
+                                    >
+                                        <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                        </svg>
+                                        Jodohkan Manual
+                                    </button>
+                                    <button 
+                                        wire:click="mountAction('tandaiNonPbf', { raw_name: '{{ addslashes($res['request']['product_name']) }}' })"
+                                        class="sd-alert-btn-nonpbf"
+                                        style="padding: 0.25rem 0.5rem; font-size: 0.7rem;"
+                                        title="Tandai bukan stok PBF"
+                                    >
+                                        🛒 Bukan PBF
+                                    </button>
+                                </div>
                             </div>
                         @endif
                     </div>
 
                     @if($hasWinner)
-                        <div class="sd-card-body">
-                            {{-- Winner --}}
-                            <div class="sd-winner">
-                                <div class="sd-section-label green">Supplier Terpilih</div>
-                                <div class="sd-winner-name">{{ $calc['winner']['supplier_name'] }}</div>
-                                <dl class="sd-dl">
-                                    <dt class="sd-dt">Harga dasar</dt>
-                                    <dd class="sd-dd">Rp {{ number_format($calc['winner']['base_price'], 0, ',', '.') }}</dd>
-                                    @if($calc['winner']['discount_pct'] > 0)
-                                        <dt class="sd-dt">Potongan diskon</dt>
-                                        <dd class="sd-dd discount">{{ $calc['winner']['discount_pct'] }}%</dd>
-                                    @endif
-                                    <dt class="sd-dt">Status PPN</dt>
-                                    <dd class="sd-dd">{{ $calc['winner']['is_ppn_included'] ? 'Sudah termasuk' : 'Ditambah 12%' }}</dd>
-                                    <hr class="sd-divider">
-                                    <dt class="sd-dt">Harga final/item</dt>
-                                    <dd class="sd-dd bold">Rp {{ number_format($calc['winner']['final_price'], 0, ',', '.') }}</dd>
-                                </dl>
-                            </div>
-
-                            {{-- Comparison --}}
-                            @php
-                                $others = collect($calc['comparisons'])
-                                    ->filter(fn($c) => $c['supplier_id'] !== $calc['winner']['supplier_id'])
-                                    ->values();
-                            @endphp
-                            @if($others->isNotEmpty())
-                                <div class="sd-compare">
-                                    <div class="sd-section-label gray">Perbandingan Supplier Lain</div>
-                                    <table>
-                                        <thead>
-                                            <tr>
-                                                <th>Supplier</th>
-                                                <th>Diskon</th>
-                                                <th style="text-align:right">Harga Final/item</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            @foreach($others as $comp)
-                                                <tr>
-                                                    <td>{{ $comp['supplier_name'] }}</td>
-                                                    <td class="mono">{{ $comp['discount_pct'] > 0 ? $comp['discount_pct'].'%' : '-' }}</td>
-                                                    <td>Rp {{ number_format($comp['final_price'], 0, ',', '.') }}</td>
-                                                </tr>
-                                            @endforeach
-                                        </tbody>
-                                    </table>
+                        @if($isNonPbf)
+                            <div class="sd-card-body" style="padding: 0.85rem 1.25rem; background: rgba(0,0,0,0.015);">
+                                <div style="font-size: 0.775rem; color: #6b7280; line-height: 1.5;">
+                                    💡 <b>Item Belanja Mandiri:</b> Produk ini ditandai sebagai non-PBF (swalayan / alkes / kosmetik). Item ini dipisahkan dari Surat Pesanan distributor farmasi dan dapat dibeli mandiri.
                                 </div>
-                            @endif
-                        </div>
+                            </div>
+                        @else
+                            <div class="sd-card-body">
+                                {{-- Winner --}}
+                                <div class="sd-winner">
+                                    <div class="sd-section-label green">Supplier Terpilih</div>
+                                    <div class="sd-winner-name">{{ $calc['winner']['supplier_name'] }}</div>
+                                    <dl class="sd-dl">
+                                        <dt class="sd-dt">Harga dasar</dt>
+                                        <dd class="sd-dd">Rp {{ number_format($calc['winner']['base_price'], 0, ',', '.') }}</dd>
+                                        @if($calc['winner']['discount_pct'] > 0)
+                                            <dt class="sd-dt">Potongan diskon</dt>
+                                            <dd class="sd-dd discount">{{ $calc['winner']['discount_pct'] }}%</dd>
+                                        @endif
+                                        <dt class="sd-dt">Status PPN</dt>
+                                        <dd class="sd-dd">{{ $calc['winner']['is_ppn_included'] ? 'Sudah termasuk' : 'Ditambah 12%' }}</dd>
+                                        <hr class="sd-divider">
+                                        <dt class="sd-dt">Harga final/item</dt>
+                                        <dd class="sd-dd bold">Rp {{ number_format($calc['winner']['final_price'], 0, ',', '.') }}</dd>
+                                    </dl>
+                                </div>
+
+                                {{-- Comparison --}}
+                                @php
+                                    $others = collect($calc['comparisons'])
+                                        ->filter(fn($c) => $c['supplier_id'] !== $calc['winner']['supplier_id'])
+                                        ->values();
+                                @endphp
+                                @if($others->isNotEmpty())
+                                    <div class="sd-compare">
+                                        <div class="sd-section-label gray">Perbandingan Supplier Lain</div>
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Supplier</th>
+                                                    <th>Diskon</th>
+                                                    <th style="text-align:right">Harga Final/item</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach($others as $comp)
+                                                    <tr>
+                                                        <td>{{ $comp['supplier_name'] }}</td>
+                                                        <td class="mono">{{ $comp['discount_pct'] > 0 ? $comp['discount_pct'].'%' : '-' }}</td>
+                                                        <td>Rp {{ number_format($comp['final_price'], 0, ',', '.') }}</td>
+                                                    </tr>
+                                                @endforeach
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
                     @endif
                 </div>
             @endforeach

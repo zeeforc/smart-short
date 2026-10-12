@@ -130,4 +130,53 @@ class DrugMatchingTest extends TestCase
         $this->assertEquals($product->id, $res['product']->id);
         $this->assertGreaterThanOrEqual(85.0, $res['confidence']);
     }
+
+    public function test_recognizes_not_stocked_alias_instantly(): void
+    {
+        ProductAlias::create([
+            'normalized_product_id' => null,
+            'alias_raw' => 'AVAIL PANTYLINER HIJAU',
+            'alias_normalized' => 'AVAIL PANTYLINER HIJAU||',
+            'status' => 'not_stocked',
+        ]);
+
+        $res = $this->matcher->match('AVAIL PANTYLINER HIJAU');
+
+        $this->assertSame('not_stocked', $res['status']);
+        $this->assertEquals(100.0, $res['confidence']);
+        $this->assertNull($res['product']);
+    }
+
+    public function test_recognizes_unlisted_alias_instantly(): void
+    {
+        ProductAlias::create([
+            'normalized_product_id' => null,
+            'alias_raw' => 'OBAT BARU BELUM ADA PBF',
+            'alias_normalized' => 'OBAT BARU BELUM ADA PBF||',
+            'status' => 'unlisted',
+        ]);
+
+        $res = $this->matcher->match('OBAT BARU BELUM ADA PBF');
+
+        $this->assertSame('unlisted', $res['status']);
+        $this->assertEquals(100.0, $res['confidence']);
+        $this->assertNull($res['product']);
+    }
+
+    public function test_does_not_suggest_completely_different_drug_below_threshold(): void
+    {
+        NormalizedProduct::create([
+            'normalized_name' => 'LINOGRA GRAHA FARMA|100MG|TAB',
+            'parsed_name' => 'LINOGRA GRAHA FARMA',
+            'parsed_strength' => '100MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 25000,
+        ]);
+
+        $res = $this->matcher->match('AVAIL PANTYLINER HIJAU');
+
+        $this->assertSame('unmatched', $res['status']);
+        $this->assertNull($res['product']);
+        $this->assertEmpty($res['suggestions']);
+    }
 }

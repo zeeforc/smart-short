@@ -13,6 +13,7 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -255,25 +256,41 @@ class SmartDefecta extends Page implements HasTable
     public function jodohkanAction(): Action
     {
         return Action::make('jodohkan')
-            ->label('Jodohkan Manual Obat')
+            ->label('Jodohkan Manual / Tentukan Status')
+            ->modalHeading('Konfirmasi & Jodohkan Obat')
+            ->modalDescription('Tentukan apakah obat ini dijodohkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.')
             ->form([
                 TextInput::make('raw_name')
                     ->label('Nama Asli di Defecta')
                     ->disabled(),
+
+                Radio::make('action_type')
+                    ->label('Keputusan untuk Item Ini')
+                    ->options([
+                        'match' => 'Jodohkan ke Obat Master PBF',
+                        'not_stocked' => 'Bukan Stok PBF (Belanja Mandiri / Swalayan / Alkes)',
+                        'unlisted' => 'Obat Belum Dijual PBF Rekanan Manapun',
+                    ])
+                    ->default('match')
+                    ->live()
+                    ->required(),
+
                 Select::make('normalized_product_id')
-                    ->label('Pilih Obat Asli')
+                    ->label('Pilih Obat Asli di Master PBF')
                     ->options(function () {
                         return NormalizedProduct::query()
                             ->selectRaw("id, concat(parsed_name, ' ', ifnull(parsed_strength, '')) as full_name")
                             ->pluck('full_name', 'id');
                     })
                     ->searchable()
-                    ->required()
-                    ->helperText('Pilih master produk yang sesuai. Rekomendasi terdekat otomatis dipilih jika tersedia.'),
+                    ->visible(fn ($get) => $get('action_type') === 'match')
+                    ->required(fn ($get) => $get('action_type') === 'match')
+                    ->helperText('Pilih master produk yang sesuai jika tersedia.'),
             ])
             ->fillForm(function (array $arguments) {
                 return [
                     'raw_name' => $arguments['raw_name'] ?? '',
+                    'action_type' => 'match',
                     'normalized_product_id' => ! empty($arguments['suggested_id']) ? (int) $arguments['suggested_id'] : null,
                 ];
             })
@@ -285,19 +302,83 @@ class SmartDefecta extends Page implements HasTable
 
                 $normalizer = app(ProductNormalizationService::class);
                 $parsed = $normalizer->parseDrugName($rawName, '');
+                $actionType = $data['action_type'] ?? 'match';
+
+                if ($actionType === 'not_stocked') {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $parsed['canonical']],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'not_stocked',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+
+                    Notification::make()
+                        ->title('Ditandai sebagai Bukan Stok PBF (Belanja Mandiri)')
+                        ->success()
+                        ->send();
+                } elseif ($actionType === 'unlisted') {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $parsed['canonical']],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'unlisted',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+
+                    Notification::make()
+                        ->title('Ditandai sebagai Belum Tersedia di PBF Manapun')
+                        ->success()
+                        ->send();
+                } else {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $parsed['canonical']],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'matched',
+                            'normalized_product_id' => $data['normalized_product_id'],
+                        ]
+                    );
+
+                    Notification::make()
+                        ->title('Berhasil dijodohkan! Data akan dikalkulasi ulang.')
+                        ->success()
+                        ->send();
+                }
+
+                $this->calculate();
+            });
+    }
+
+    public function tandaiNonPbfAction(): Action
+    {
+        return Action::make('tandaiNonPbf')
+            ->label('Tandai Bukan Stok PBF')
+            ->requiresConfirmation()
+            ->modalHeading('Tandai Sebagai Bukan Stok PBF?')
+            ->modalDescription('Barang ini akan ditandai sebagai belanja mandiri / non-PBF dan dipisahkan dari Surat Pesanan distributor.')
+            ->action(function (array $arguments) {
+                $rawName = $arguments['raw_name'] ?? '';
+                if (! $rawName) {
+                    return;
+                }
+
+                $normalizer = app(ProductNormalizationService::class);
+                $parsed = $normalizer->parseDrugName($rawName, '');
 
                 ProductAlias::updateOrCreate(
-                    [
-                        'alias_normalized' => $parsed['canonical'],
-                    ],
+                    ['alias_normalized' => $parsed['canonical']],
                     [
                         'alias_raw' => $rawName,
-                        'normalized_product_id' => $data['normalized_product_id'],
+                        'status' => 'not_stocked',
+                        'normalized_product_id' => null,
                     ]
                 );
 
                 Notification::make()
-                    ->title('Berhasil dijodohkan! Data akan dikalkulasi ulang.')
+                    ->title("{$rawName} ditandai sebagai Bukan Stok PBF")
                     ->success()
                     ->send();
 
