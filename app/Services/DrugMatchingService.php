@@ -120,6 +120,7 @@ class DrugMatchingService
                 'status' => 'unmatched',
                 'product' => null,
                 'confidence' => 0.0,
+                'total_candidates' => 0,
                 'matched_name' => null,
                 'suggestions' => [],
                 'reason' => 'Nama obat tidak valid atau terlalu pendek',
@@ -132,17 +133,17 @@ class DrugMatchingService
                 'status' => 'unmatched',
                 'product' => null,
                 'confidence' => 0.0,
+                'total_candidates' => 0,
                 'matched_name' => null,
                 'suggestions' => [],
-                'reason' => 'Tidak ditemukan produk di pricelist supplier',
+                'reason' => 'Tidak ditemukan produk di pricelist supplier manapun',
             ];
         }
 
         $scoredCandidates = [];
         foreach ($candidates as $candidate) {
             $score = $this->calculateSimilarityScore($reqName, $reqTokens, $reqStrength, $reqForm, $candidate);
-            // Ambang batas saran dinaikkan ke minimal 70% agar produk non-obat tidak dipaksakan cocok
-            if ($score >= 70.0) {
+            if ($score >= 35.0) {
                 $scoredCandidates[] = [
                     'product' => $candidate,
                     'name' => trim("{$candidate->parsed_name} {$candidate->parsed_strength}"),
@@ -156,9 +157,10 @@ class DrugMatchingService
                 'status' => 'unmatched',
                 'product' => null,
                 'confidence' => 0.0,
+                'total_candidates' => 0,
                 'matched_name' => null,
                 'suggestions' => [],
-                'reason' => 'Tidak ada produk dengan kemiripan yang cukup (di bawah 70%)',
+                'reason' => 'Tidak ditemukan produk dengan kemiripan yang sesuai',
             ];
         }
 
@@ -166,6 +168,7 @@ class DrugMatchingService
 
         $best = $scoredCandidates[0];
         $runnerUp = $scoredCandidates[1] ?? null;
+        $totalCandidates = count($scoredCandidates);
 
         // Kriteria Auto-Match: Skor >= 85% dan bukan kasus ambigu yang terlalu berdekatan
         $isDominant = $runnerUp === null
@@ -185,21 +188,25 @@ class DrugMatchingService
                 'status' => 'auto_matched',
                 'product' => $best['product'],
                 'confidence' => $best['confidence'],
+                'total_candidates' => $totalCandidates,
                 'matched_name' => $best['name'],
-                'suggestions' => array_slice($scoredCandidates, 0, 3),
+                'suggestions' => array_slice($scoredCandidates, 0, 5),
                 'reason' => null,
             ];
         }
+
+        $reason = $totalCandidates > 1
+            ? "Terdapat {$totalCandidates} varian produk serupa di pricelist PBF"
+            : 'Tingkat kemiripan ('.round($best['confidence']).'%) butuh konfirmasi';
 
         return [
             'status' => 'ambiguous',
             'product' => null,
             'confidence' => $best['confidence'],
+            'total_candidates' => $totalCandidates,
             'matched_name' => null,
-            'suggestions' => array_slice($scoredCandidates, 0, 3),
-            'reason' => ($runnerUp && ($best['confidence'] - $runnerUp['confidence'] < 8.0))
-                ? 'Terdapat beberapa varian produk serupa'
-                : 'Tingkat kemiripan ('.round($best['confidence']).'%) butuh konfirmasi',
+            'suggestions' => array_slice($scoredCandidates, 0, 5),
+            'reason' => $reason,
         ];
     }
 
@@ -208,8 +215,9 @@ class DrugMatchingService
      */
     protected function findCandidatePool(array $reqTokens, ?string $reqStrength): Collection
     {
-        $firstToken = $reqTokens[0] ?? '';
-        $prefix = mb_substr($firstToken, 0, 4);
+        if (empty($reqTokens)) {
+            return collect();
+        }
 
         $query = NormalizedProduct::query();
         if (! empty($reqStrength)) {
@@ -219,6 +227,10 @@ class DrugMatchingService
             });
         }
 
+        $firstToken = $reqTokens[0] ?? '';
+        $prefix = mb_substr($firstToken, 0, 4);
+
+        // 1. Prefix match pada nama utama (misal: 'ARKA%' untuk Arkavit)
         if (mb_strlen($prefix) >= 3) {
             $narrowed = (clone $query)->where('parsed_name', 'like', $prefix.'%')->get();
             if ($narrowed->isNotEmpty()) {
@@ -226,6 +238,7 @@ class DrugMatchingService
             }
         }
 
+        // 2. Token utama utuh jika letaknya di tengah kata
         if (mb_strlen($firstToken) >= 3) {
             $byToken = (clone $query)->where('parsed_name', 'like', '%'.$firstToken.'%')->get();
             if ($byToken->isNotEmpty()) {
@@ -233,7 +246,25 @@ class DrugMatchingService
             }
         }
 
-        return $query->limit(1000)->get();
+        // 3. Cari kata signifikan lainnya (panjang >= 4, bukan sediaan umum)
+        $commonForms = ['TAB', 'KAP', 'SYR', 'INJ', 'DROP', 'OINT', 'CR', 'SUSP', 'FORTE', 'PLUS'];
+        $sigTokens = array_filter($reqTokens, fn ($t) => mb_strlen($t) >= 4 && ! in_array($t, $commonForms, true));
+
+        if (! empty($sigTokens)) {
+            $tokenQuery = clone $query;
+            $tokenQuery->where(function ($q) use ($sigTokens) {
+                foreach ($sigTokens as $tok) {
+                    $q->orWhere('parsed_name', 'like', '%'.$tok.'%');
+                }
+            });
+            $res = $tokenQuery->limit(200)->get();
+            if ($res->isNotEmpty()) {
+                return $res;
+            }
+        }
+
+        // Kembalikan empty jika tidak ada token nama yang cocok (mencegah salah jodoh dengan obat acak)
+        return collect();
     }
 
     /**
@@ -269,7 +300,7 @@ class DrugMatchingService
         }
 
         // 3. Token Jaccard & Containment Score
-        $candTokens = $this->extractTokens($candName);
+        $candTokens = $this->extractTokens("{$candName} {$candStrength} {$candForm}");
         if (empty($candTokens)) {
             return 0.0;
         }
@@ -281,9 +312,14 @@ class DrugMatchingService
         $jaccard = $unionCount > 0 ? ($intersectionCount / $unionCount) : 0.0;
         $containment = count($reqTokens) > 0 ? ($intersectionCount / count($reqTokens)) : 0.0;
 
-        $tokenScore = (0.6 * $containment + 0.4 * $jaccard) * 100.0;
+        // Jika semua kata permintaan ada pada kandidat (misal: ARKAVIT KAPLET ada di ARKAVIT KAPL. BALATIF)
+        if ($containment >= 1.0 && $intersectionCount > 0) {
+            $tokenScore = 80.0 + (15.0 * $jaccard);
+        } else {
+            $tokenScore = (0.7 * $containment + 0.3 * $jaccard) * 100.0;
+        }
 
-        // 4. Token-Sorted Similarity (Mengatasi urutan kata terbalik)
+        // 4. Token-Sorted Similarity & Typo matching
         $sortedReq = $reqTokens;
         sort($sortedReq);
         $sortedCand = $candTokens;
@@ -307,12 +343,24 @@ class DrugMatchingService
      */
     protected function extractTokens(string $name): array
     {
-        $words = preg_split('/\s+/', mb_strtoupper(trim($name)));
+        // Bersihkan tanda baca, tanda petik, dan simbol pembatas
+        $cleaned = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $name);
+        $words = preg_split('/\s+/', mb_strtoupper(trim($cleaned)));
+
+        $formSynonyms = [
+            'KAPLET' => 'KAP', 'KAPL' => 'KAP', 'KAPSUL' => 'KAP', 'KAPS' => 'KAP',
+            'TABLET' => 'TAB', 'TABL' => 'TAB',
+            'SIRUP' => 'SYR', 'SYRUP' => 'SYR', 'SUSPENSI' => 'SYR', 'SUSP' => 'SYR',
+            'CREAM' => 'CR', 'KRIM' => 'CR', 'SALEP' => 'OINT',
+            'INJEKSI' => 'INJ', 'TETES' => 'DROP', 'DROPS' => 'DROP',
+            'GRAM' => 'GR', 'GM' => 'GR',
+        ];
+
         $tokens = [];
         foreach ($words as $w) {
             $w = trim($w);
             if (mb_strlen($w) > 1) {
-                $tokens[] = $w;
+                $tokens[] = $formSynonyms[$w] ?? $w;
             }
         }
 

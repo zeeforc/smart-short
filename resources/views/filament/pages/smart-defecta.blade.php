@@ -430,6 +430,7 @@
                                 $uQty = $unmatched['request']['qty'];
                                 $uInfo = $unmatched['calculation']['match_info'] ?? null;
                                 $topSugg = $uInfo['suggestions'][0] ?? null;
+                                $totalCandidates = $uInfo['total_candidates'] ?? count($uInfo['suggestions'] ?? []);
                             @endphp
                             <div class="sd-alert-row">
                                 <div class="sd-alert-row-left">
@@ -437,13 +438,18 @@
                                     <div>
                                         <span class="sd-alert-drug">{{ $uName }}</span>
                                         <span class="sd-alert-qty">({{ $uQty }} item)</span>
-                                        @if($topSugg && ($topSugg['confidence'] ?? 0) >= 70)
-                                            <div class="sd-alert-sugg-text">
-                                                💡 Rekomendasi terdekat: <strong>{{ $topSugg['name'] }}</strong> (Akurasi: {{ round($topSugg['confidence']) }}%)
+                                        @if($topSugg)
+                                            <div class="sd-alert-sugg-text" style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.2rem;">
+                                                💡 @if($totalCandidates > 1)
+                                                    <span style="display: inline-flex; align-items: center; background: #e0e7ff; color: #3730a3; padding: 0.1rem 0.5rem; border-radius: 9999px; font-weight: 700; font-size: 0.72rem;">
+                                                        Ditemukan {{ $totalCandidates }} produk cocok
+                                                    </span>
+                                                @endif
+                                                <span>Rekomendasi terdekat: <strong>{{ $topSugg['name'] }}</strong> (Akurasi: {{ round($topSugg['confidence']) }}%)</span>
                                             </div>
                                         @else
                                             <div class="sd-alert-none-text">
-                                                {{ $uInfo['reason'] ?? 'Tidak ditemukan di pricelist supplier manapun' }}
+                                                {{ $uInfo['reason'] ?? 'Tidak ditemukan produk di pricelist supplier manapun' }}
                                             </div>
                                         @endif
                                     </div>
@@ -451,7 +457,7 @@
                                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;">
                                     <button 
                                         type="button"
-                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ ($topSugg && ($topSugg['confidence'] ?? 0) >= 70) ? ($topSugg['product']['id'] ?? '') : '' }}' })"
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ $topSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidates_count: '{{ $totalCandidates }}' })"
                                         class="sd-alert-action-btn"
                                     >
                                         Jodohkan Manual
@@ -514,17 +520,23 @@
                             @php
                                 $mInfo = $calc['match_info'] ?? null;
                                 $topSugg = $mInfo['suggestions'][0] ?? null;
-                                $hasValidSugg = $topSugg && (($topSugg['confidence'] ?? 0) >= 70);
+                                $totalCandidates = $mInfo['total_candidates'] ?? count($mInfo['suggestions'] ?? []);
+                                $hasValidSugg = ! empty($topSugg);
                             @endphp
                             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
                                 @if($hasValidSugg)
-                                    <div class="sd-sugg-inline">
-                                        Saran: <b>{{ $topSugg['name'] }}</b> ({{ round($topSugg['confidence']) }}%)
+                                    <div class="sd-sugg-inline" style="display: flex; align-items: center; gap: 0.35rem;">
+                                        @if($totalCandidates > 1)
+                                            <span style="display: inline-block; background: #e0e7ff; color: #3730a3; padding: 0.05rem 0.4rem; border-radius: 9999px; font-weight: 700; font-size: 0.68rem;">
+                                                {{ $totalCandidates }} produk cocok
+                                            </span>
+                                        @endif
+                                        <span>Saran: <b>{{ $topSugg['name'] }}</b> ({{ round($topSugg['confidence']) }}%)</span>
                                     </div>
                                 @endif
                                 <div style="display: flex; align-items: center; gap: 0.35rem;">
                                     <button 
-                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $hasValidSugg ? ($topSugg['product']['id'] ?? '') : '' }}' })"
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $hasValidSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidates_count: '{{ $totalCandidates }}' })"
                                         class="sd-badge-missing"
                                         style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
                                         title="Klik untuk mencocokkan obat secara manual"

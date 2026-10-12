@@ -179,4 +179,38 @@ class DrugMatchingTest extends TestCase
         $this->assertNull($res['product']);
         $this->assertEmpty($res['suggestions']);
     }
+
+    public function test_matches_and_counts_multiple_drug_variants_such_as_arkavit(): void
+    {
+        NormalizedProduct::create([
+            'normalized_name' => 'ARKAVIT KAPL. BALATIF||KAP',
+            'parsed_name' => 'ARKAVIT KAPL. BALATIF',
+            'parsed_strength' => null,
+            'parsed_form' => 'KAP',
+            'lowest_price' => 30000,
+        ]);
+
+        NormalizedProduct::create([
+            'normalized_name' => 'ARKAVIT-C KAPL. BALATIF||KAP',
+            'parsed_name' => 'ARKAVIT-C KAPL. BALATIF',
+            'parsed_strength' => null,
+            'parsed_form' => 'KAP',
+            'lowest_price' => 35000,
+        ]);
+
+        NormalizedProduct::create([
+            'normalized_name' => "ARKAVIT KAPLET 'BALATIF'/50||KAP",
+            'parsed_name' => "ARKAVIT KAPLET 'BALATIF'/50",
+            'parsed_strength' => null,
+            'parsed_form' => 'KAP',
+            'lowest_price' => 28000,
+        ]);
+
+        $res = $this->matcher->match('ARKAVIT KAPLET');
+
+        $this->assertNotEmpty($res['suggestions']);
+        $this->assertGreaterThanOrEqual(2, $res['total_candidates']);
+        $this->assertGreaterThanOrEqual(80.0, $res['suggestions'][0]['confidence']);
+        $this->assertStringContainsString('ARKAVIT', $res['suggestions'][0]['name']);
+    }
 }

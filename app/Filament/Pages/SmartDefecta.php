@@ -258,7 +258,17 @@ class SmartDefecta extends Page implements HasTable
         return Action::make('jodohkan')
             ->label('Jodohkan Manual / Tentukan Status')
             ->modalHeading('Konfirmasi & Jodohkan Obat')
-            ->modalDescription('Tentukan apakah obat ini dijodohkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.')
+            ->modalDescription(function (array $arguments) {
+                $raw = $arguments['raw_name'] ?? 'Obat ini';
+                $count = (int) ($arguments['candidates_count'] ?? 0);
+                if ($count > 1) {
+                    return "Ditemukan {$count} produk di katalog distributor untuk '{$raw}'. Rekomendasi terdekat telah otomatis dipilih.";
+                } elseif ($count === 1) {
+                    return "Ditemukan 1 produk rekomendasi di katalog distributor untuk '{$raw}'.";
+                }
+
+                return "Tentukan apakah '{$raw}' dijodohkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.";
+            })
             ->form([
                 TextInput::make('raw_name')
                     ->label('Nama Asli di Defecta')
@@ -285,7 +295,13 @@ class SmartDefecta extends Page implements HasTable
                     ->searchable()
                     ->visible(fn ($get) => $get('action_type') === 'match')
                     ->required(fn ($get) => $get('action_type') === 'match')
-                    ->helperText('Pilih master produk yang sesuai jika tersedia.'),
+                    ->helperText(function (array $arguments) {
+                        $count = (int) ($arguments['candidates_count'] ?? 0);
+
+                        return $count > 0
+                            ? "Sistem menemukan {$count} produk mirip di PBF. Rekomendasi teratas telah dipilih."
+                            : 'Pilih master produk yang sesuai jika tersedia.';
+                    }),
             ])
             ->fillForm(function (array $arguments) {
                 return [
