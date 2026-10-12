@@ -360,4 +360,39 @@ class DrugMatchingTest extends TestCase
         $this->assertEquals(38000.0, $result['winner']['base_price']);
         $this->assertCount(2, $result['comparisons']);
     }
+
+    public function test_order_calculation_service_uses_cache_and_calculates_correctly(): void
+    {
+        $supplier = Supplier::create([
+            'name' => 'DISTRIBUTOR A',
+            'is_active' => true,
+            'is_ppn_included' => true,
+        ]);
+
+        $product = NormalizedProduct::create([
+            'normalized_name' => 'PARACETAMOL|500MG|TAB',
+            'parsed_name' => 'PARACETAMOL',
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 10000,
+            'price_history_json' => [
+                [
+                    'supplier_id' => $supplier->id,
+                    'raw_name' => 'PARACETAMOL 500MG',
+                    'price' => 10000,
+                    'unit' => 'BOX',
+                ],
+            ],
+        ]);
+
+        $calcService = app(OrderCalculationService::class);
+
+        $res1 = $calcService->calculateBestSupplier('PARACETAMOL 500MG', 1);
+        $this->assertNotNull($res1['winner']);
+        $this->assertEquals(10000.0, $res1['winner']['final_price']);
+
+        $res2 = $calcService->calculateBestSupplier('PARACETAMOL 500MG', 2);
+        $this->assertNotNull($res2['winner']);
+        $this->assertEquals(10000.0, $res2['winner']['final_price']);
+    }
 }

@@ -13,6 +13,7 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -271,6 +272,8 @@ class SmartDefecta extends Page implements HasTable
                 return "Tentukan apakah '{$raw}' dijodohkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.";
             })
             ->form([
+                Hidden::make('candidate_ids'),
+
                 TextInput::make('raw_name')
                     ->label('Nama Asli di Defecta')
                     ->disabled(),
@@ -288,20 +291,77 @@ class SmartDefecta extends Page implements HasTable
 
                 Select::make('normalized_product_id')
                     ->label('Pilih Obat Asli di Master PBF')
-                    ->options(function () {
-                        return NormalizedProduct::query()
-                            ->selectRaw("id, concat(parsed_name, ' ', ifnull(parsed_strength, '')) as full_name")
-                            ->pluck('full_name', 'id');
-                    })
                     ->searchable()
+                    ->getSearchResultsUsing(function (string $search): array {
+                        $search = trim($search);
+                        if (mb_strlen($search) < 2) {
+                            return [];
+                        }
+
+                        $terms = array_filter(explode(' ', $search));
+                        $query = NormalizedProduct::query();
+
+                        foreach ($terms as $term) {
+                            $query->where(function ($q) use ($term) {
+                                $q->where('parsed_name', 'like', "%{$term}%")
+                                    ->orWhere('normalized_name', 'like', "%{$term}%")
+                                    ->orWhere('parsed_strength', 'like', "%{$term}%");
+                            });
+                        }
+
+                        return $query->limit(30)
+                            ->get()
+                            ->mapWithKeys(function ($p) {
+                                $strength = $p->parsed_strength ? " {$p->parsed_strength}" : '';
+
+                                return [$p->id => trim("{$p->parsed_name}{$strength}")];
+                            })
+                            ->all();
+                    })
+                    ->getOptionLabelUsing(function ($value): ?string {
+                        if (! $value) {
+                            return null;
+                        }
+
+                        $p = NormalizedProduct::find($value);
+                        if (! $p) {
+                            return null;
+                        }
+
+                        $strength = $p->parsed_strength ? " {$p->parsed_strength}" : '';
+
+                        return trim("{$p->parsed_name}{$strength}");
+                    })
+                    ->options(function ($get): array {
+                        $ids = array_filter(explode(',', (string) $get('candidate_ids')));
+                        if ($selectedId = $get('normalized_product_id')) {
+                            $ids[] = $selectedId;
+                        }
+                        $ids = array_unique(array_filter(array_map('intval', $ids)));
+
+                        if (empty($ids)) {
+                            return [];
+                        }
+
+                        return NormalizedProduct::query()
+                            ->whereIn('id', $ids)
+                            ->get()
+                            ->mapWithKeys(function ($p) {
+                                $strength = $p->parsed_strength ? " {$p->parsed_strength}" : '';
+
+                                return [$p->id => trim("{$p->parsed_name}{$strength}")];
+                            })
+                            ->all();
+                    })
                     ->visible(fn ($get) => $get('action_type') === 'match')
                     ->required(fn ($get) => $get('action_type') === 'match')
                     ->helperText(fn ($get) => $get('normalized_product_id')
                         ? 'Rekomendasi terbaik telah dipilih otomatis. Anda dapat menggantinya jika perlu.'
-                        : 'Pilih produk master yang sesuai dari katalog distributor.'),
+                        : 'Ketik nama obat untuk mencari di katalog distributor atau pilih dari rekomendasi.'),
             ])
             ->fillForm(function (array $arguments) {
                 return [
+                    'candidate_ids' => $arguments['candidate_ids'] ?? '',
                     'raw_name' => $arguments['raw_name'] ?? '',
                     'action_type' => 'match',
                     'normalized_product_id' => ! empty($arguments['suggested_id']) ? (int) $arguments['suggested_id'] : null,
@@ -356,12 +416,12 @@ class SmartDefecta extends Page implements HasTable
                     );
 
                     Notification::make()
-                        ->title('Berhasil dijodohkan! Data akan dikalkulasi ulang.')
+                        ->title('Berhasil dijodohkan!')
                         ->success()
                         ->send();
                 }
 
-                $this->calculate();
+                $this->recalculateSingleItem($rawName);
             });
     }
 
@@ -395,7 +455,33 @@ class SmartDefecta extends Page implements HasTable
                     ->success()
                     ->send();
 
-                $this->calculate();
+                $this->recalculateSingleItem($rawName);
             });
+    }
+
+    public function recalculateSingleItem(string $rawName): void
+    {
+        if (empty($this->calculationResults)) {
+            $this->calculate();
+
+            return;
+        }
+
+        $service = app(OrderCalculationService::class);
+        $found = false;
+
+        foreach ($this->calculationResults as $idx => $res) {
+            if (($res['request']['product_name'] ?? '') === $rawName) {
+                $qty = (int) ($res['request']['qty'] ?? 1);
+                $calc = $service->calculateBestSupplier($rawName, $qty);
+
+                $this->calculationResults[$idx]['calculation'] = $calc;
+                $found = true;
+            }
+        }
+
+        if (! $found) {
+            $this->calculate();
+        }
     }
 }

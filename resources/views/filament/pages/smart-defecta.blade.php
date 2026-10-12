@@ -431,6 +431,10 @@
                                 $uInfo = $unmatched['calculation']['match_info'] ?? null;
                                 $topSugg = $uInfo['suggestions'][0] ?? null;
                                 $totalCandidates = $uInfo['total_candidates'] ?? count($uInfo['suggestions'] ?? []);
+                                $candidateIds = collect($uInfo['suggestions'] ?? [])
+                                    ->pluck('product.id')
+                                    ->filter()
+                                    ->implode(',');
                             @endphp
                             <div class="sd-alert-row">
                                 <div class="sd-alert-row-left">
@@ -457,7 +461,7 @@
                                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;">
                                     <button 
                                         type="button"
-                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ $topSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidates_count: '{{ $totalCandidates }}' })"
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($uName) }}', suggested_id: '{{ $topSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidate_ids: '{{ $candidateIds }}', candidates_count: '{{ $totalCandidates }}' })"
                                         class="sd-alert-action-btn"
                                     >
                                         Jodohkan Manual
@@ -522,6 +526,10 @@
                                 $topSugg = $mInfo['suggestions'][0] ?? null;
                                 $totalCandidates = $mInfo['total_candidates'] ?? count($mInfo['suggestions'] ?? []);
                                 $hasValidSugg = ! empty($topSugg);
+                                $candidateIds = collect($mInfo['suggestions'] ?? [])
+                                    ->pluck('product.id')
+                                    ->filter()
+                                    ->implode(',');
                             @endphp
                             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem;">
                                 @if($hasValidSugg)
@@ -536,7 +544,7 @@
                                 @endif
                                 <div style="display: flex; align-items: center; gap: 0.35rem;">
                                     <button 
-                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $hasValidSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidates_count: '{{ $totalCandidates }}' })"
+                                        wire:click="mountAction('jodohkan', { raw_name: '{{ addslashes($res['request']['product_name']) }}', suggested_id: '{{ $hasValidSugg ? ($topSugg['product']['id'] ?? '') : '' }}', candidate_ids: '{{ $candidateIds }}', candidates_count: '{{ $totalCandidates }}' })"
                                         class="sd-badge-missing"
                                         style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
                                         title="Klik untuk mencocokkan obat secara manual"

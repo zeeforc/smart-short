@@ -10,6 +10,21 @@ use Illuminate\Support\Collection;
 
 class OrderCalculationService
 {
+    /** @var array<int, Supplier|null> */
+    protected array $suppliersCache = [];
+
+    /** @var array<int, Collection> */
+    protected array $globalDiscountsCache = [];
+
+    protected function getSupplier(int $supplierId): ?Supplier
+    {
+        if (! array_key_exists($supplierId, $this->suppliersCache)) {
+            $this->suppliersCache[$supplierId] = Supplier::find($supplierId);
+        }
+
+        return $this->suppliersCache[$supplierId];
+    }
+
     /**
      * Cari supplier termurah untuk suatu obat berdasarkan QTY
      * Termasuk memotong diskon dan menambah PPN (12%) jika belum include
@@ -81,7 +96,7 @@ class OrderCalculationService
             $basePrice = (float) $offer['price'];
             $rawName = $offer['raw_name'];
 
-            $supplier = Supplier::find($supplierId);
+            $supplier = $this->getSupplier($supplierId);
             if (! $supplier || ! $supplier->is_active) {
                 continue;
             }
@@ -145,11 +160,15 @@ class OrderCalculationService
             return (float) $productDiscount->discount_pct;
         }
 
-        // Kalau nggak ada, cek diskon global supplier
-        $globalDiscount = SupplierDiscountTier::where('supplier_id', $supplierId)
-            ->where('min_qty', '<=', $qty)
-            ->orderByDesc('min_qty')
-            ->first();
+        // Kalau nggak ada, cek diskon global supplier (cached per supplier)
+        if (! array_key_exists($supplierId, $this->globalDiscountsCache)) {
+            $this->globalDiscountsCache[$supplierId] = SupplierDiscountTier::where('supplier_id', $supplierId)
+                ->orderByDesc('min_qty')
+                ->get();
+        }
+
+        $globalDiscount = $this->globalDiscountsCache[$supplierId]
+            ->first(fn ($tier) => $tier->min_qty <= $qty);
 
         if ($globalDiscount) {
             return (float) $globalDiscount->discount_pct;
