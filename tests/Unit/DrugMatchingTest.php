@@ -213,4 +213,55 @@ class DrugMatchingTest extends TestCase
         $this->assertGreaterThanOrEqual(80.0, $res['suggestions'][0]['confidence']);
         $this->assertStringContainsString('ARKAVIT', $res['suggestions'][0]['name']);
     }
+
+    public function test_rejects_different_brand_such_as_allergen_vs_alletrol(): void
+    {
+        NormalizedProduct::create([
+            'normalized_name' => 'ALLETROL SALEP MATA||OINT',
+            'parsed_name' => 'ALLETROL SALEP MATA',
+            'parsed_strength' => null,
+            'parsed_form' => 'OINT',
+            'lowest_price' => 20000,
+        ]);
+
+        $res = $this->matcher->match('ALLERGEN TAB');
+
+        $this->assertSame('unmatched', $res['status']);
+        $this->assertNull($res['product']);
+        $this->assertEmpty($res['suggestions']);
+    }
+
+    public function test_rejects_different_brand_such_as_alerzin_vs_alerten(): void
+    {
+        NormalizedProduct::create([
+            'normalized_name' => 'ALERTEN Q TAB 100MG||TAB',
+            'parsed_name' => 'ALERTEN Q TAB',
+            'parsed_strength' => '100MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 85000,
+        ]);
+
+        $res = $this->matcher->match('ALERZIN TAB');
+
+        $this->assertSame('unmatched', $res['status']);
+        $this->assertNull($res['product']);
+        $this->assertEmpty($res['suggestions']);
+    }
+
+    public function test_matches_same_brand_such_as_alerhis(): void
+    {
+        $product = NormalizedProduct::create([
+            'normalized_name' => 'ALERHIS KAPLET LAPI 10MG||KAP',
+            'parsed_name' => "ALERHIS KAPLET 'LAPI'",
+            'parsed_strength' => '10MG',
+            'parsed_form' => 'KAP',
+            'lowest_price' => 12000,
+        ]);
+
+        $res = $this->matcher->match('ALERHIS TAB');
+
+        $this->assertNotEmpty($res['suggestions']);
+        $this->assertGreaterThanOrEqual(75.0, $res['suggestions'][0]['confidence']);
+        $this->assertStringContainsString('ALERHIS', $res['suggestions'][0]['name']);
+    }
 }

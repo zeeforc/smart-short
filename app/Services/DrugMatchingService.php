@@ -143,7 +143,8 @@ class DrugMatchingService
         $scoredCandidates = [];
         foreach ($candidates as $candidate) {
             $score = $this->calculateSimilarityScore($reqName, $reqTokens, $reqStrength, $reqForm, $candidate);
-            if ($score >= 35.0) {
+            // Ambang batas ketat: hanya simpan jika skor >= 70% dan brand terverifikasi cocok
+            if ($score >= 70.0) {
                 $scoredCandidates[] = [
                     'product' => $candidate,
                     'name' => trim("{$candidate->parsed_name} {$candidate->parsed_strength}"),
@@ -160,7 +161,7 @@ class DrugMatchingService
                 'total_candidates' => 0,
                 'matched_name' => null,
                 'suggestions' => [],
-                'reason' => 'Tidak ditemukan produk dengan kemiripan yang sesuai',
+                'reason' => 'Tidak ditemukan produk yang cocok di pricelist supplier',
             ];
         }
 
@@ -247,8 +248,7 @@ class DrugMatchingService
         }
 
         // 3. Cari kata signifikan lainnya (panjang >= 4, bukan sediaan umum)
-        $commonForms = ['TAB', 'KAP', 'SYR', 'INJ', 'DROP', 'OINT', 'CR', 'SUSP', 'FORTE', 'PLUS'];
-        $sigTokens = array_filter($reqTokens, fn ($t) => mb_strlen($t) >= 4 && ! in_array($t, $commonForms, true));
+        $sigTokens = array_values(array_filter($reqTokens, fn ($t) => $this->isSignificantToken($t)));
 
         if (! empty($sigTokens)) {
             $tokenQuery = clone $query;
@@ -288,23 +288,26 @@ class DrugMatchingService
             }
         }
 
-        // 2. Guard Sediaan Cair vs Padat (mencegah sirup tertukar dengan tablet)
-        $isReqLiquid = in_array($reqForm, ['SYR', 'DROP', 'SUSP'], true) || preg_match('/\b(syr|drop|susp|sirup)\b/i', $reqName);
-        $isCandLiquid = in_array($candForm, ['SYR', 'DROP', 'SUSP'], true) || preg_match('/\b(syr|drop|susp|sirup)\b/i', $candName);
-
-        $isReqSolid = in_array($reqForm, ['TAB', 'KAP'], true) || preg_match('/\b(tab|kap|tablet|kaplet)\b/i', $reqName);
-        $isCandSolid = in_array($candForm, ['TAB', 'KAP'], true) || preg_match('/\b(tab|kap|tablet|kaplet)\b/i', $candName);
-
-        if (($isReqLiquid && $isCandSolid) || ($isReqSolid && $isCandLiquid)) {
+        // 2. Guard Bentuk Sediaan (Tablet vs Salep Mata vs Sirup vs Injeksi)
+        $reqCat = $this->getDosageCategory($reqName, $reqForm);
+        $candCat = $this->getDosageCategory($candName, $candForm);
+        if ($reqCat !== null && $candCat !== null && $reqCat !== $candCat) {
             return 0.0;
         }
 
-        // 3. Token Jaccard & Containment Score
+        // 3. Ekstrak token kandidat
         $candTokens = $this->extractTokens("{$candName} {$candStrength} {$candForm}");
         if (empty($candTokens)) {
             return 0.0;
         }
 
+        // 4. Guard Brand / Nama Utama: Wajib ada token nama obat signifikan yang cocok (identik atau typo maks 1 huruf)
+        // Mencegah ALLERGEN salah dipasangkan ke ALLETROL, atau ALERZIN ke ALERTEN
+        if (! $this->hasMatchingSignificantToken($reqTokens, $candTokens)) {
+            return 0.0;
+        }
+
+        // 5. Token Jaccard & Containment Score
         $intersection = array_intersect($reqTokens, $candTokens);
         $intersectionCount = count($intersection);
         $unionCount = count(array_unique(array_merge($reqTokens, $candTokens)));
@@ -319,7 +322,7 @@ class DrugMatchingService
             $tokenScore = (0.7 * $containment + 0.3 * $jaccard) * 100.0;
         }
 
-        // 4. Token-Sorted Similarity & Typo matching
+        // 6. Token-Sorted Similarity & Typo matching
         $sortedReq = $reqTokens;
         sort($sortedReq);
         $sortedCand = $candTokens;
@@ -330,12 +333,112 @@ class DrugMatchingService
 
         $finalScore = max($tokenScore, (float) $sortedSim, (float) $rawSim);
 
+        // Boost jika nama brand utama cocok persis (misal ALERHIS == ALERHIS, ALERMAX == ALERMAX)
+        $reqSigTokens = array_values(array_filter($reqTokens, fn ($t) => $this->isSignificantToken($t)));
+        if (! empty($reqSigTokens) && in_array($reqSigTokens[0], $candTokens, true)) {
+            $finalScore = max($finalScore, 75.0);
+        }
+
         // Boost jika dosis cocok persis
         if (! empty($reqStrength) && $reqStrength === $candStrength) {
             $finalScore = min(100.0, $finalScore + 5.0);
         }
 
         return $finalScore;
+    }
+
+    /**
+     * Guard Kategori Bentuk Sediaan: Mencegah tablet tertukar dengan salep mata, sirup, dll.
+     */
+    protected function getDosageCategory(string $name, ?string $form): ?string
+    {
+        $combined = mb_strtoupper($name.' '.($form ?? ''));
+
+        if (preg_match('/\b(salep\s*mata|tetes\s*mata|tetes\s*telinga|gtt|eye\s*drop|eye\s*oint|ear\s*drop)\b/i', $combined)) {
+            return 'OPHTHALMIC_OTIC';
+        }
+        if (preg_match('/\b(salep|cream|krim|cr|oint|ointment|gel|lotion|pasta)\b/i', $combined)) {
+            return 'TOPICAL';
+        }
+        if (preg_match('/\b(syr|sirup|susp|suspensi|emulsi|elixir|drop|drops)\b/i', $combined)) {
+            return 'LIQUID_ORAL';
+        }
+        if (preg_match('/\b(tab|tablet|kap|kaplet|kaps|kapsul|pil)\b/i', $combined)) {
+            return 'SOLID_ORAL';
+        }
+        if (preg_match('/\b(inj|injeksi|infus|vial|amp|ampul)\b/i', $combined)) {
+            return 'INJECTABLE';
+        }
+
+        return null;
+    }
+
+    /**
+     * Memeriksa apakah token adalah kata nama obat / zat aktif signifikan (bukan bentuk sediaan / noise)
+     */
+    protected function isSignificantToken(string $token): bool
+    {
+        $nonSignificant = [
+            'TAB', 'KAP', 'SYR', 'INJ', 'DROP', 'OINT', 'CR', 'SUSP',
+            'SALEP', 'CREAM', 'KRIM', 'TABLET', 'KAPLET', 'KAPSUL', 'SIRUP',
+            'OBAT', 'MINYAK', 'BALSEM', 'CAP', 'CAPS', 'GEL', 'LOTION', 'PASTA',
+            'MATA', 'TELINGA', 'KULIT', 'GEN', 'GENERIC', 'GENERIK',
+            'FORTE', 'PLUS', 'EXTRA', 'SERUM', 'GR', 'GM', 'ML', 'MG', 'MCG', 'IU',
+            'NO', 'NEW', 'UK', 'BESAR', 'KECIL', 'D', 'R',
+        ];
+
+        return mb_strlen($token) >= 3 && ! in_array($token, $nonSignificant, true);
+    }
+
+    /**
+     * Guard Brand / Nama Utama: Wajib memiliki kesamaan kata nama obat utama.
+     * Mencegah ALLERGEN salah dicocokkan ke ALLETROL, atau ALERZIN ke ALERTEN.
+     *
+     * @param  array<string>  $reqTokens
+     * @param  array<string>  $candTokens
+     */
+    protected function hasMatchingSignificantToken(array $reqTokens, array $candTokens): bool
+    {
+        $reqSigTokens = array_values(array_filter($reqTokens, fn ($t) => $this->isSignificantToken($t)));
+        if (empty($reqSigTokens)) {
+            return true;
+        }
+
+        $candSigTokens = array_values(array_filter($candTokens, fn ($t) => $this->isSignificantToken($t)));
+        if (empty($candSigTokens)) {
+            return false;
+        }
+
+        $primaryReq = $reqSigTokens[0];
+
+        foreach ($candSigTokens as $candTok) {
+            // Cocok persis
+            if ($primaryReq === $candTok) {
+                return true;
+            }
+
+            // Typo minor (jarak edit <= 1 untuk kata dengan panjang >= 5 huruf)
+            // Contoh: AMOXICILIN vs AMOXICILLIN (dist 1, len 10)
+            if (mb_strlen($primaryReq) >= 5 && mb_strlen($candTok) >= 5) {
+                if (levenshtein($primaryReq, $candTok) <= 1) {
+                    return true;
+                }
+            }
+        }
+
+        // Jika request punya lebih dari 1 token signifikan (misal: "ASAM MEFENAMAT"),
+        // cek apakah ada token signifikan lain yang cocok
+        if (count($reqSigTokens) > 1) {
+            foreach ($reqSigTokens as $reqTok) {
+                foreach ($candSigTokens as $candTok) {
+                    if ($reqTok === $candTok) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
