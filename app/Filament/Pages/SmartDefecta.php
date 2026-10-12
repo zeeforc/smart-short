@@ -258,11 +258,12 @@ class SmartDefecta extends Page implements HasTable
         return Action::make('jodohkan')
             ->label('Jodohkan Manual / Tentukan Status')
             ->modalHeading('Konfirmasi & Jodohkan Obat')
-            ->modalDescription(function (array $arguments) {
-                $raw = $arguments['raw_name'] ?? 'Obat ini';
-                $count = (int) ($arguments['candidates_count'] ?? 0);
+            ->modalDescription(function (Action $action) {
+                $args = $action->getArguments();
+                $raw = $args['raw_name'] ?? 'Obat ini';
+                $count = (int) ($args['candidates_count'] ?? 0);
                 if ($count > 1) {
-                    return "Ditemukan {$count} produk di katalog distributor untuk '{$raw}'. Rekomendasi terdekat telah otomatis dipilih.";
+                    return "Ditemukan {$count} produk cocok di katalog distributor untuk '{$raw}'. Rekomendasi terdekat telah otomatis dipilih.";
                 } elseif ($count === 1) {
                     return "Ditemukan 1 produk rekomendasi di katalog distributor untuk '{$raw}'.";
                 }
@@ -295,13 +296,9 @@ class SmartDefecta extends Page implements HasTable
                     ->searchable()
                     ->visible(fn ($get) => $get('action_type') === 'match')
                     ->required(fn ($get) => $get('action_type') === 'match')
-                    ->helperText(function (array $arguments) {
-                        $count = (int) ($arguments['candidates_count'] ?? 0);
-
-                        return $count > 0
-                            ? "Sistem menemukan {$count} produk mirip di PBF. Rekomendasi teratas telah dipilih."
-                            : 'Pilih master produk yang sesuai jika tersedia.';
-                    }),
+                    ->helperText(fn ($get) => $get('normalized_product_id')
+                        ? 'Rekomendasi terbaik telah dipilih otomatis. Anda dapat menggantinya jika perlu.'
+                        : 'Pilih produk master yang sesuai dari katalog distributor.'),
             ])
             ->fillForm(function (array $arguments) {
                 return [
