@@ -19,30 +19,52 @@
 
                 // Modal State
                 isModalOpen: false,
+                modalMode: 'batch', // 'batch' (semua obat) atau 'single' (1 obat saja)
+                singleRawName: null,
                 modalFilter: '',
                 isSubmitting: false,
                 items: (config && config.initialBatch) ? config.initialBatch : [],
 
-                openModal(cardId = null) {
-                    this.isModalOpen = true;
+                openBatchModal() {
+                    this.modalMode = 'batch';
+                    this.singleRawName = null;
                     this.modalFilter = '';
+                    this.isModalOpen = true;
                     document.body.classList.add('overflow-hidden');
+                },
 
-                    if (cardId) {
-                        this.$nextTick(() => {
-                            const el = document.getElementById(cardId);
-                            if (el) {
-                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                el.classList.add('sd-highlight-pulse');
-                                setTimeout(() => el.classList.remove('sd-highlight-pulse'), 2500);
-                            }
-                        });
+                openSingleModal(rawName) {
+                    this.modalMode = 'single';
+                    this.singleRawName = rawName;
+                    this.modalFilter = '';
+                    this.isModalOpen = true;
+                    document.body.classList.add('overflow-hidden');
+                },
+
+                openModal(arg = null) {
+                    if (arg) {
+                        const byCard = this.items.find(i => i.card_id === arg);
+                        if (byCard) {
+                            this.openSingleModal(byCard.raw_name);
+                        } else {
+                            this.openSingleModal(arg);
+                        }
+                    } else {
+                        this.openBatchModal();
                     }
                 },
 
                 closeModal() {
                     this.isModalOpen = false;
+                    this.singleRawName = null;
                     document.body.classList.remove('overflow-hidden');
+                },
+
+                displayedItems() {
+                    if (this.modalMode === 'single' && this.singleRawName) {
+                        return this.items.filter(item => item.raw_name === this.singleRawName);
+                    }
+                    return this.filteredItems();
                 },
 
                 filteredItems() {
@@ -130,14 +152,29 @@
                 },
 
                 async submitBatchDecisions() {
-                    const toProcess = this.items.filter(i => i.action_type !== 'skip');
+                    let toProcess = [];
+                    if (this.modalMode === 'single' && this.singleRawName) {
+                        toProcess = this.items.filter(i => i.raw_name === this.singleRawName);
+                    } else {
+                        toProcess = this.items.filter(i => i.action_type !== 'skip');
+                    }
+
                     if (toProcess.length === 0) {
                         alert('Pilih setidaknya 1 obat untuk dicocokkan atau ditandai bukan PBF.');
                         return;
                     }
+
+                    if (this.modalMode === 'single') {
+                        const singleItem = toProcess[0];
+                        if (singleItem.action_type === 'match' && !singleItem.normalized_product_id) {
+                            alert('Silakan pilih salah satu produk rekomendasi distributor atau cari master terlebih dahulu.');
+                            return;
+                        }
+                    }
+
                     this.isSubmitting = true;
                     try {
-                        const payload = this.items.map(i => ({
+                        const payload = toProcess.map(i => ({
                             raw_name: i.raw_name,
                             action_type: i.action_type,
                             normalized_product_id: i.normalized_product_id
@@ -1409,7 +1446,7 @@
                         </div>
                         <button 
                             type="button"
-                            @click="openModal()"
+                            @click="openBatchModal()"
                             class="sd-alert-btn-batch"
                             title="Buka modal untuk mencocokkan semua obat sekaligus"
                         >
@@ -1457,9 +1494,9 @@
                                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;">
                                     <button 
                                         type="button"
-                                        @click="openModal('{{ 'batch-card-' . md5($uName) }}')"
+                                        @click="openSingleModal('{{ addslashes($uName) }}')"
                                         class="sd-alert-action-btn"
-                                        title="Buka modal dan fokus ke obat ini"
+                                        title="Cocokkan hanya obat ini"
                                     >
                                         Cocokkan Manual
                                     </button>
@@ -1542,10 +1579,10 @@
                                 <div style="display: flex; align-items: center; gap: 0.35rem;">
                                     <button 
                                         type="button"
-                                        @click="openModal('{{ 'batch-card-' . md5($res['request']['product_name']) }}')"
+                                        @click="openSingleModal('{{ addslashes($res['request']['product_name']) }}')"
                                         class="sd-badge-missing"
                                         style="cursor: pointer; display: flex; align-items: center; gap: 0.25rem;"
-                                        title="Klik untuk membuka modal dan mencocokkan obat"
+                                        title="Cocokkan hanya obat ini"
                                     >
                                         <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
@@ -1659,9 +1696,10 @@
                                 </svg>
                             </div>
                             <div>
-                                <h3 class="sd-modal-title">Cocokkan Obat Defecta Sekaligus</h3>
+                                <h3 class="sd-modal-title" x-text="modalMode === 'single' ? ('Cocokkan Obat: ' + singleRawName) : 'Cocokkan Obat Defecta Sekaligus'"></h3>
                                 <p class="sd-modal-desc">
-                                    Ada <span style="font-weight: 700;" x-text="items.length"></span> obat butuh perhatian. Rekomendasi terdekat telah otomatis dipilihkan untuk Anda. Anda bisa scroll, sesuaikan pilihan, dan simpan semuanya sekaligus dalam satu klik.
+                                    <span x-show="modalMode === 'single'">Tentukan status dan pilih rekomendasi distributor untuk obat ini.</span>
+                                    <span x-show="modalMode === 'batch'">Ada <span style="font-weight: 700;" x-text="items.length"></span> obat butuh perhatian. Rekomendasi terdekat telah otomatis dipilihkan untuk Anda. Anda bisa scroll, sesuaikan pilihan, dan simpan semuanya sekaligus dalam satu klik.</span>
                                 </p>
                             </div>
                         </div>
@@ -1672,8 +1710,8 @@
                         </button>
                     </div>
 
-                    {{-- Modal Toolbar --}}
-                    <div class="sd-modal-toolbar">
+                    {{-- Modal Toolbar (Hanya ditampilkan di mode Sekaligus / Batch) --}}
+                    <div class="sd-modal-toolbar" x-show="modalMode === 'batch'">
                         <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                             <button type="button" class="sd-toolbar-btn primary" @click="applyAllSuggestions()">
                                 ⚡ Terapkan Semua Rekomendasi
@@ -1714,9 +1752,9 @@
                         </div>
                     </div>
 
-                    {{-- Modal Body (Scrollable Cards) --}}
+                    {{-- Modal Body (Cards) --}}
                     <div class="sd-modal-body">
-                        <template x-for="(item, idx) in filteredItems()" :key="item.card_id">
+                        <template x-for="(item, idx) in displayedItems()" :key="item.card_id">
                             <div 
                                 :id="item.card_id"
                                 class="sd-batch-card"
@@ -1896,11 +1934,16 @@
                     {{-- Modal Footer --}}
                     <div class="sd-modal-footer">
                         <div class="sd-footer-summary">
-                            <span style="font-weight: 600; color: #111827;" class="dark:text-white">Siap diproses:</span>
-                            <span style="color: #059669; font-weight: 700;" x-text="countMatched() + ' dicocokkan'"></span>, 
-                            <span style="color: #d97706; font-weight: 700;" x-text="countNotStocked() + ' non-PBF'"></span>, 
-                            <span style="color: #7c3aed; font-weight: 700;" x-text="countUnlisted() + ' belum ada PBF'"></span>
-                            <span style="color: #9ca3af;" x-text="'(' + countSkipped() + ' dilewati)'"></span>
+                            <div x-show="modalMode === 'batch'">
+                                <span style="font-weight: 600; color: #111827;" class="dark:text-white">Siap diproses:</span>
+                                <span style="color: #059669; font-weight: 700;" x-text="countMatched() + ' dicocokkan'"></span>, 
+                                <span style="color: #d97706; font-weight: 700;" x-text="countNotStocked() + ' non-PBF'"></span>, 
+                                <span style="color: #7c3aed; font-weight: 700;" x-text="countUnlisted() + ' belum ada PBF'"></span>
+                                <span style="color: #9ca3af;" x-text="'(' + countSkipped() + ' dilewati)'"></span>
+                            </div>
+                            <div x-show="modalMode === 'single'" style="color: #4b5563; font-size: 0.85rem;">
+                                <span>Pencocokan 1 Obat</span>
+                            </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.75rem;">
                             <button type="button" class="sd-modal-cancel-btn" @click="closeModal()" :disabled="isSubmitting">
@@ -1910,10 +1953,15 @@
                                 type="button" 
                                 class="sd-modal-save-btn" 
                                 @click="submitBatchDecisions()" 
-                                :disabled="isSubmitting || (countMatched() + countNotStocked() + countUnlisted() === 0)"
+                                :disabled="isSubmitting || (modalMode === 'batch' && (countMatched() + countNotStocked() + countUnlisted() === 0))"
                             >
                                 <span x-show="!isSubmitting">
-                                    Simpan & Terapkan (<span x-text="countMatched() + countNotStocked() + countUnlisted()"></span> Obat)
+                                    <span x-show="modalMode === 'batch'">
+                                        Simpan & Terapkan (<span x-text="countMatched() + countNotStocked() + countUnlisted()"></span> Obat)
+                                    </span>
+                                    <span x-show="modalMode === 'single'">
+                                        Simpan & Cocokkan Obat
+                                    </span>
                                 </span>
                                 <span x-show="isSubmitting" style="display: flex; align-items: center; gap: 0.4rem;" x-cloak>
                                     <svg style="width: 1rem; height: 1rem; animation: spin 1s linear infinite;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
