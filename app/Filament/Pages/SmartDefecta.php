@@ -258,8 +258,8 @@ class SmartDefecta extends Page implements HasTable
     public function jodohkanAction(): Action
     {
         return Action::make('jodohkan')
-            ->label('Jodohkan Manual / Tentukan Status')
-            ->modalHeading('Konfirmasi & Jodohkan Obat')
+            ->label('Cocokkan Manual / Tentukan Status')
+            ->modalHeading('Konfirmasi & Cocokkan Obat')
             ->modalDescription(function (Action $action) {
                 $args = $action->getArguments();
                 $raw = $args['raw_name'] ?? 'Obat ini';
@@ -270,7 +270,7 @@ class SmartDefecta extends Page implements HasTable
                     return "Ditemukan 1 produk rekomendasi di katalog distributor untuk '{$raw}'.";
                 }
 
-                return "Tentukan apakah '{$raw}' dijodohkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.";
+                return "Tentukan apakah '{$raw}' dicocokkan ke master PBF, atau ditandai sebagai non-PBF/belum ada distributor.";
             })
             ->form([
                 Hidden::make('candidate_ids'),
@@ -282,7 +282,7 @@ class SmartDefecta extends Page implements HasTable
                 Radio::make('action_type')
                     ->label('Keputusan untuk Item Ini')
                     ->options([
-                        'match' => 'Jodohkan ke Obat Master PBF',
+                        'match' => 'Cocokkan ke Obat Master PBF',
                         'not_stocked' => 'Bukan Stok PBF (Belanja Mandiri / Swalayan / Alkes)',
                         'unlisted' => 'Obat Belum Dijual PBF Rekanan Manapun',
                     ])
@@ -417,7 +417,7 @@ class SmartDefecta extends Page implements HasTable
                     );
 
                     Notification::make()
-                        ->title('Berhasil dijodohkan!')
+                        ->title('Berhasil dicocokkan!')
                         ->success()
                         ->send();
                 }
@@ -585,7 +585,7 @@ class SmartDefecta extends Page implements HasTable
 
             Notification::make()
                 ->title("Berhasil memproses {$totalUpdated} obat!")
-                ->body("{$matchedCount} obat dijodohkan, {$notStockedCount} bukan stok PBF, {$unlistedCount} belum ada distributor.")
+                ->body("{$matchedCount} obat dicocokkan, {$notStockedCount} bukan stok PBF, {$unlistedCount} belum ada distributor.")
                 ->success()
                 ->send();
         } else {

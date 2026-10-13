@@ -344,7 +344,7 @@ class DrugMatchingTest extends TestCase
             ],
         ]);
 
-        // Jodohkan manual defecta ke P1
+        // Cocokkan manual defecta ke P1
         ProductAlias::create([
             'alias_raw' => 'AMPICILIN 500 MG TAB NOVA',
             'alias_normalized' => 'AMPICILIN TAB NOVA|500MG|',

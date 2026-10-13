@@ -263,7 +263,7 @@ class DrugMatchingService
             }
         }
 
-        // Kembalikan empty jika tidak ada token nama yang cocok (mencegah salah jodoh dengan obat acak)
+        // Kembalikan empty jika tidak ada token nama yang cocok (mencegah salah cocok dengan obat acak)
         return collect();
     }
 

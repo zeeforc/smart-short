@@ -17,7 +17,7 @@
                 ->filter(fn($r) => !empty($r['calculation']['winner']))
                 ->sum(fn($r) => $r['calculation']['winner']['final_price'] * $r['request']['qty']);
 
-            // Data inisial untuk modal batch matching (Jodohkan Sekaligus)
+            // Data inisial untuk modal batch matching (Cocokkan Sekaligus)
             $batchInitialData = $unmatchedList->map(function ($item, $idx) {
                 $rawName = $item['request']['product_name'];
                 $qty = $item['request']['qty'];
@@ -1252,7 +1252,7 @@
                             <svg style="width: 1.1rem; height: 1.1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
                             </svg>
-                            <span>Jodohkan Sekaligus ({{ $missingItems }} Obat)</span>
+                            <span>Cocokkan Sekaligus ({{ $missingItems }} Obat)</span>
                         </button>
                     </div>
                     <div class="sd-alert-items">
@@ -1297,7 +1297,7 @@
                                         class="sd-alert-action-btn"
                                         title="Buka modal dan fokus ke obat ini"
                                     >
-                                        Jodohkan Manual
+                                        Cocokkan Manual
                                     </button>
                                     <button 
                                         type="button"
@@ -1386,7 +1386,7 @@
                                         <svg style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
                                         </svg>
-                                        Jodohkan Manual
+                                        Cocokkan Manual
                                     </button>
                                     <button 
                                         wire:click="mountAction('tandaiNonPbf', { raw_name: '{{ addslashes($res['request']['product_name']) }}' })"
@@ -1478,7 +1478,7 @@
                 </div>
             </div>
 
-            {{-- Modal Jodohkan Sekaligus (Batch Match Modal) --}}
+            {{-- Modal Cocokkan Sekaligus (Batch Match Modal) --}}
             <div 
                 x-show="isModalOpen" 
                 x-cloak 
@@ -1495,7 +1495,7 @@
                                 </svg>
                             </div>
                             <div>
-                                <h3 class="sd-modal-title">Jodohkan Obat Defecta Sekaligus</h3>
+                                <h3 class="sd-modal-title">Cocokkan Obat Defecta Sekaligus</h3>
                                 <p class="sd-modal-desc">
                                     Ada <span style="font-weight: 700;" x-text="items.length"></span> obat butuh perhatian. Rekomendasi terdekat telah otomatis dipilihkan untuk Anda. Anda bisa scroll, sesuaikan pilihan, dan simpan semuanya sekaligus dalam satu klik.
                                 </p>
@@ -1534,8 +1534,8 @@
                                 />
                             </div>
                             <div class="sd-toolbar-counters">
-                                <span class="sd-counter-pill match" title="Akan dijodohkan ke master PBF">
-                                    🔗 <strong x-text="countMatched()"></strong> Jodoh
+                                <span class="sd-counter-pill match" title="Akan dicocokkan ke master PBF">
+                                    🔗 <strong x-text="countMatched()"></strong> Cocok
                                 </span>
                                 <span class="sd-counter-pill nonpbf" title="Akan ditandai belanja mandiri (bukan PBF)">
                                     🛒 <strong x-text="countNotStocked()"></strong> Bukan PBF
@@ -1593,7 +1593,7 @@
                                         @click="item.action_type = 'match'"
                                     >
                                         <span class="sd-radio-dot"></span>
-                                        <span>Jodohkan Master PBF</span>
+                                        <span>Cocokkan Master PBF</span>
                                     </button>
                                     <button 
                                         type="button" 
@@ -1733,7 +1733,7 @@
                     <div class="sd-modal-footer">
                         <div class="sd-footer-summary">
                             <span style="font-weight: 600; color: #111827;" class="dark:text-white">Siap diproses:</span>
-                            <span style="color: #059669; font-weight: 700;" x-text="countMatched() + ' dijodohkan'"></span>, 
+                            <span style="color: #059669; font-weight: 700;" x-text="countMatched() + ' dicocokkan'"></span>, 
                             <span style="color: #d97706; font-weight: 700;" x-text="countNotStocked() + ' non-PBF'"></span>, 
                             <span style="color: #7c3aed; font-weight: 700;" x-text="countUnlisted() + ' belum ada PBF'"></span>
                             <span style="color: #9ca3af;" x-text="'(' + countSkipped() + ' dilewati)'"></span>
@@ -1893,7 +1893,7 @@
                     async submitBatchDecisions() {
                         const toProcess = this.items.filter(i => i.action_type !== 'skip');
                         if (toProcess.length === 0) {
-                            alert('Pilih setidaknya 1 obat untuk dijodohkan atau ditandai bukan PBF.');
+                            alert('Pilih setidaknya 1 obat untuk dicocokkan atau ditandai bukan PBF.');
                             return;
                         }
                         this.isSubmitting = true;

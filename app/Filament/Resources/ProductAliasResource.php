@@ -20,7 +20,7 @@ class ProductAliasResource extends Resource
 
     protected static \BackedEnum|string|null $navigationIcon = 'heroicon-o-arrows-right-left';
 
-    protected static ?string $navigationLabel = 'Alias & Jodohkan Obat';
+    protected static ?string $navigationLabel = 'Alias & Cocokkan Obat';
 
     protected static \UnitEnum|string|null $navigationGroup = 'Master Data';
 
@@ -41,7 +41,7 @@ class ProductAliasResource extends Resource
                 Forms\Components\Select::make('status')
                     ->label('Status Produk')
                     ->options([
-                        'matched' => 'Dijodohkan ke Obat PBF',
+                        'matched' => 'Dicocokkan ke Obat PBF',
                         'not_stocked' => 'Bukan Stok PBF (Belanja Mandiri)',
                         'unlisted' => 'Obat Belum Dijual PBF Rekanan',
                     ])
@@ -76,7 +76,7 @@ class ProductAliasResource extends Resource
                         default => '✅ Cocok ke PBF',
                     }),
                 Tables\Columns\TextColumn::make('normalizedProduct.parsed_name')
-                    ->label('Dijodohkan Ke')
+                    ->label('Dicocokkan Ke')
                     ->placeholder('-')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')

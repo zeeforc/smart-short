@@ -14,7 +14,7 @@ Dokumen ini adalah panduan resmi langkah demi langkah operasional aplikasi **Sma
 [3. Upload Defecta / Rencana Belanja]
          ↓
 [4. Kalkulasi Cerdas (Auto-Match & Alert)]
-         ↓ (Jika ada 1-2 obat belum cocok: Jodohkan 1-Klik)
+         ↓ (Jika ada 1-2 obat belum cocok: Cocokkan 1-Klik)
 [5. Unduh Surat Pesanan (Excel)]
 ```
 
@@ -74,7 +74,7 @@ Halaman ini berfungsi sebagai keranjang belanja terpusat apotek. Data tersimpan 
 
 1. Klik tombol biru **Kalkulasi Pemenang** di atas tabel.
 2. Sistem menjalankan **Multi-Layer Smart Matcher**:
-   * **Pengecekan Kamus Alias:** Jika obat pernah dijodohkan sebelumnya, langsung cocok 100%.
+   * **Pengecekan Kamus Alias:** Jika obat pernah dicocokkan sebelumnya, langsung cocok 100%.
    * **Pencocokan Urutan Kata:** Obat seperti `SANMOL FORTE SYR` otomatis cocok dengan `SANMOL SYR FORTE`.
    * **Toleransi Typo:** Ejaan salah seperti `AMOXICILIN 500MG` otomatis cocok ke `AMOXICILLIN 500MG`.
    * **Pengaman Medis:** Dosis `5mg` dijamin tidak akan tertukar dengan `10mg`, dan sirup tidak akan tertukar dengan tablet.
@@ -83,20 +83,20 @@ Halaman ini berfungsi sebagai keranjang belanja terpusat apotek. Data tersimpan 
 
 ---
 
-## Langkah 5: Cek Alert & Jodohkan Obat yang Belum Cocok
+## Langkah 5: Cek Alert & Cocokkan Obat yang Belum Cocok
 Jika ada obat yang belum pernah ada di pricelist distributor manapun atau namanya ambigu, sistem akan menampilkan **Banner Peringatan (Alert Box)** berwarna oranye di atas kartu hasil:
 
 ```
 ⚠️ Perlu Perhatian: 2 Obat Belum Terhubung ke Pricelist
-1. ALERZIN SIRUP (10 item) — 💡 Rekomendasi terdekat: LERZIN SIRUP 60ML (Akurasi: 82%)  [Jodohkan Manual]
-2. ALKES SPUIT 3CC (5 item) — Tidak ditemukan di pricelist supplier manapun             [Jodohkan Manual]
+1. ALERZIN SIRUP (10 item) — 💡 Rekomendasi terdekat: LERZIN SIRUP 60ML (Akurasi: 82%)  [Cocokkan Manual]
+2. ALKES SPUIT 3CC (5 item) — Tidak ditemukan di pricelist supplier manapun             [Cocokkan Manual]
 ```
 
-### Cara Menjodohkan (1-Klik):
-1. Klik tombol **Jodohkan Manual** pada baris obat tersebut.
+### Cara Mencocokkan (1-Klik atau Sekaligus):
+1. Klik tombol **Cocokkan Manual** pada baris obat tersebut, atau klik **Cocokkan Sekaligus** untuk memproses banyak obat dalam satu modal interaktif.
 2. Modal akan muncul dan **rekomendasi obat terdekat sudah otomatis terpilih**.
 3. Klik tombol **Simpan**.
-4. Sistem otomatis menyimpan ke tabel **Alias & Jodohkan Obat**, lalu langsung mengkalkulasi ulang pemenang.
+4. Sistem otomatis menyimpan ke tabel **Alias & Cocokkan Obat**, lalu langsung mengkalkulasi ulang pemenang.
 5. **Ingat Selamanya:** Bulan depan saat obat tersebut muncul di defecta, sistem sudah mengingatnya dan langsung cocok secara otomatis!
 
 ---
@@ -117,8 +117,8 @@ Jika ada obat yang belum pernah ada di pricelist distributor manapun atau namany
 ### Q: Apakah saya harus menyetel Smart Mapping di setiap supplier satu per satu?
 **Tidak.** Sistem sudah dibekali daftar kata kunci sinonim umum (nama, obat, produk, hna, harga, gross, net, disc, dll). Anda hanya perlu membuka pengaturan mapping jika ada supplier yang format Excel-nya aneh dan gagal terbaca otomatis.
 
-### Q: Bagaimana cara melihat atau mengedit daftar obat yang sudah pernah dijodohkan?
-Buka menu **Master Data → Alias & Jodohkan Obat**. Di sana Anda bisa melihat seluruh daftar nama asli di defecta beserta produk master pasangannya, dan bisa dihapus atau diubah kapan saja.
+### Q: Bagaimana cara melihat atau mengedit daftar obat yang sudah pernah dicocokkan?
+Buka menu **Master Data → Alias & Cocokkan Obat**. Di sana Anda bisa melihat seluruh daftar nama asli di defecta beserta produk master pasangannya, dan bisa dihapus atau diubah kapan saja.
 
 ### Q: Mengapa distributor A yang diskonnya lebih besar tidak menang melawan distributor B?
 Periksa status PPN distributor: jika distributor A harganya belum termasuk PPN (kena tambahan 12%), harga akhirnya bisa jadi lebih mahal dibanding distributor B yang harganya sudah include PPN meskipun diskonnya lebih kecil. Sistem selalu membandingkan **harga final netto riil yang harus dibayar apotek**.
