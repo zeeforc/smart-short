@@ -25,6 +25,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -482,6 +483,136 @@ class SmartDefecta extends Page implements HasTable
 
         if (! $found) {
             $this->calculate();
+        }
+    }
+
+    public function searchNormalizedProducts(string $query): array
+    {
+        $query = trim($query);
+        if (mb_strlen($query) < 2) {
+            return [];
+        }
+
+        $terms = array_filter(explode(' ', $query));
+        $dbQuery = NormalizedProduct::query();
+
+        foreach ($terms as $term) {
+            $dbQuery->where(function ($q) use ($term) {
+                $q->where('parsed_name', 'like', "%{$term}%")
+                    ->orWhere('normalized_name', 'like', "%{$term}%")
+                    ->orWhere('parsed_strength', 'like', "%{$term}%");
+            });
+        }
+
+        return $dbQuery->limit(25)
+            ->get()
+            ->map(function ($p) {
+                $strength = $p->parsed_strength ? " {$p->parsed_strength}" : '';
+
+                return [
+                    'id' => $p->id,
+                    'name' => trim("{$p->parsed_name}{$strength}"),
+                ];
+            })
+            ->all();
+    }
+
+    public function saveBatchMatching(array $decisions): void
+    {
+        if (empty($decisions)) {
+            return;
+        }
+
+        $normalizer = app(ProductNormalizationService::class);
+        $matchedCount = 0;
+        $notStockedCount = 0;
+        $unlistedCount = 0;
+        $recalculateNames = [];
+
+        DB::transaction(function () use ($decisions, $normalizer, &$matchedCount, &$notStockedCount, &$unlistedCount, &$recalculateNames) {
+            foreach ($decisions as $item) {
+                $rawName = $item['raw_name'] ?? '';
+                $actionType = $item['action_type'] ?? 'skip';
+                $productId = ! empty($item['normalized_product_id']) ? (int) $item['normalized_product_id'] : null;
+
+                if (! $rawName || $actionType === 'skip') {
+                    continue;
+                }
+
+                $parsed = $normalizer->parseDrugName($rawName, '');
+                $canonical = $parsed['canonical'];
+
+                if ($actionType === 'not_stocked') {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'not_stocked',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+                    $notStockedCount++;
+                    $recalculateNames[] = $rawName;
+                } elseif ($actionType === 'unlisted') {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'unlisted',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+                    $unlistedCount++;
+                    $recalculateNames[] = $rawName;
+                } elseif ($actionType === 'match' && $productId) {
+                    ProductAlias::updateOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'matched',
+                            'normalized_product_id' => $productId,
+                        ]
+                    );
+                    $matchedCount++;
+                    $recalculateNames[] = $rawName;
+                }
+            }
+        });
+
+        $totalUpdated = $matchedCount + $notStockedCount + $unlistedCount;
+        if ($totalUpdated > 0) {
+            $this->recalculateMultipleItems($recalculateNames);
+
+            Notification::make()
+                ->title("Berhasil memproses {$totalUpdated} obat!")
+                ->body("{$matchedCount} obat dijodohkan, {$notStockedCount} bukan stok PBF, {$unlistedCount} belum ada distributor.")
+                ->success()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('Tidak ada perubahan yang disimpan')
+                ->info()
+                ->send();
+        }
+    }
+
+    public function recalculateMultipleItems(array $rawNames): void
+    {
+        if (empty($this->calculationResults)) {
+            $this->calculate();
+
+            return;
+        }
+
+        $service = app(OrderCalculationService::class);
+        $namesSet = array_flip($rawNames);
+
+        foreach ($this->calculationResults as $idx => $res) {
+            $productName = $res['request']['product_name'] ?? '';
+            if (isset($namesSet[$productName])) {
+                $qty = (int) ($res['request']['qty'] ?? 1);
+                $this->calculationResults[$idx]['calculation'] = $service->calculateBestSupplier($productName, $qty);
+            }
         }
     }
 }

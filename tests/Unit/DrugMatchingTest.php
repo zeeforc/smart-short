@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Filament\Pages\SmartDefecta;
 use App\Models\NormalizedProduct;
 use App\Models\ProductAlias;
 use App\Models\Supplier;
@@ -394,5 +395,88 @@ class DrugMatchingTest extends TestCase
         $res2 = $calcService->calculateBestSupplier('PARACETAMOL 500MG', 2);
         $this->assertNotNull($res2['winner']);
         $this->assertEquals(10000.0, $res2['winner']['final_price']);
+    }
+
+    public function test_batch_matching_saves_multiple_aliases(): void
+    {
+        $supplier = Supplier::create([
+            'name' => 'DISTRIBUTOR A',
+            'is_active' => true,
+            'is_ppn_included' => true,
+        ]);
+
+        $p1 = NormalizedProduct::create([
+            'normalized_name' => 'BIOLYSIN APPETITE SYR|60ML|SYR',
+            'parsed_name' => 'BIOLYSIN APPETITE SYR',
+            'parsed_strength' => '60ML',
+            'parsed_form' => 'SYR',
+            'lowest_price' => 15000,
+        ]);
+
+        $page = new SmartDefecta;
+
+        $decisions = [
+            [
+                'raw_name' => 'BIOLYSIN SYR 60 ML',
+                'action_type' => 'match',
+                'normalized_product_id' => $p1->id,
+            ],
+            [
+                'raw_name' => 'BALSEM GELIGA 40 GR',
+                'action_type' => 'not_stocked',
+                'normalized_product_id' => null,
+            ],
+            [
+                'raw_name' => 'OBAT LANGKA 100MG',
+                'action_type' => 'unlisted',
+                'normalized_product_id' => null,
+            ],
+            [
+                'raw_name' => 'OBAT DILEWATI',
+                'action_type' => 'skip',
+                'normalized_product_id' => null,
+            ],
+        ];
+
+        $page->saveBatchMatching($decisions);
+
+        $this->assertDatabaseHas('product_aliases', [
+            'alias_raw' => 'BIOLYSIN SYR 60 ML',
+            'status' => 'matched',
+            'normalized_product_id' => $p1->id,
+        ]);
+
+        $this->assertDatabaseHas('product_aliases', [
+            'alias_raw' => 'BALSEM GELIGA 40 GR',
+            'status' => 'not_stocked',
+            'normalized_product_id' => null,
+        ]);
+
+        $this->assertDatabaseHas('product_aliases', [
+            'alias_raw' => 'OBAT LANGKA 100MG',
+            'status' => 'unlisted',
+            'normalized_product_id' => null,
+        ]);
+
+        $this->assertDatabaseMissing('product_aliases', [
+            'alias_raw' => 'OBAT DILEWATI',
+        ]);
+    }
+
+    public function test_search_normalized_products_returns_matching_results(): void
+    {
+        NormalizedProduct::create([
+            'normalized_name' => 'BIOLYSIN SMART SYR|60ML|SYR',
+            'parsed_name' => 'BIOLYSIN SMART SYR',
+            'parsed_strength' => '60ML',
+            'parsed_form' => 'SYR',
+            'lowest_price' => 18000,
+        ]);
+
+        $page = new SmartDefecta;
+        $results = $page->searchNormalizedProducts('biolysin 60ml');
+
+        $this->assertNotEmpty($results);
+        $this->assertStringContainsString('BIOLYSIN SMART SYR', $results[0]['name']);
     }
 }
