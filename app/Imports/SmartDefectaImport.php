@@ -38,10 +38,12 @@ class SmartDefectaImport implements ToCollection
 
                 foreach ($values as $colIdx => $val) {
                     $valStr = strtolower(trim((string) $val));
+                    $isPriceColumn = str_contains($valStr, 'harga') || str_contains($valStr, 'rp') || str_contains($valStr, 'total') || str_contains($valStr, 'subtotal') || str_contains($valStr, 'nilai') || str_contains($valStr, 'biaya') || str_contains($valStr, 'diskon') || str_contains($valStr, 'disc');
+
                     if (str_contains($valStr, 'nama') || str_contains($valStr, 'obat') || str_contains($valStr, 'produk') || str_contains($valStr, 'barang') || str_contains($valStr, 'item')) {
                         $nameIndex = $colIdx;
                         $hasNameHeader = true;
-                    } elseif (str_contains($valStr, 'qty') || str_contains($valStr, 'jumlah') || str_contains($valStr, 'restock') || str_contains($valStr, 'pesan')) {
+                    } elseif (! $isPriceColumn && (str_contains($valStr, 'qty') || str_contains($valStr, 'kuantitas') || str_contains($valStr, 'jumlah') || str_contains($valStr, 'jml') || str_contains($valStr, 'restock') || str_contains($valStr, 'pesan') || str_contains($valStr, 'order') || str_contains($valStr, 'orderan'))) {
                         $qtyIndex = $colIdx;
                         $hasQtyHeader = true;
                     }
@@ -89,13 +91,19 @@ class SmartDefectaImport implements ToCollection
                 $qtyStr = (string) $qtyVal;
 
                 if (preg_match('/(\d+)/', $qtyStr, $matches) && (int) $matches[1] > 0) {
-                    $qty = (int) $matches[1];
+                    $parsed = (int) $matches[1];
+                    // Guardrail: pesanan defecta apotek wajar tidak pernah di atas 5.000 per obat.
+                    // Jika > 5.000, kemungkinan salah baca kolom barcode/SKU/nominal uang.
+                    $qty = ($parsed > 5000) ? 1 : $parsed;
                 } else {
                     // Fallback to searching for numeric qty in the row if the index failed
                     foreach ($values as $idx => $val) {
-                        if ($idx !== $nameIndex && $idx !== 0 && preg_match('/(\d+)/', (string) $val, $m) && (int) $m[1] > 0) {
-                            $qty = (int) $m[1];
-                            break;
+                        if ($idx !== $nameIndex && $idx !== 0 && preg_match('/^(\d+)$/', trim((string) $val), $m) && (int) $m[1] > 0) {
+                            $parsed = (int) $m[1];
+                            if ($parsed <= 5000) {
+                                $qty = $parsed;
+                                break;
+                            }
                         }
                     }
                 }

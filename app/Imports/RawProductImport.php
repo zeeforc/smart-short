@@ -130,12 +130,17 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
     }
 
     /**
-     * Bersihkan format uang/angka (misal: "Rp 15.000,00", "10,500", "35,963.00")
+     * Bersihkan format uang/angka (misal: "Rp 15.000,00", "10,500", "35,963.00", "4450.545")
      */
     private function cleanNumber($value): float
     {
         if (empty($value)) {
             return 0.0;
+        }
+
+        // Jika sudah berbentuk int atau float asli dari PhpSpreadsheet, gunakan langsung
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
         }
 
         $clean = trim((string) $value);
@@ -148,14 +153,15 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         $hasDot = str_contains($clean, '.');
         $hasComma = str_contains($clean, ',');
 
+        // Kasus 1: Mengandung titik DAN koma (misal: "12,000.50" atau "12.000,50")
         if ($hasDot && $hasComma) {
             $lastDot = strrpos($clean, '.');
             $lastComma = strrpos($clean, ',');
             if ($lastDot > $lastComma) {
-                // US standard: 12,000.50 -> strip comma
+                // Format US: 12,000.50 -> hilangkan koma
                 $clean = str_replace(',', '', $clean);
             } else {
-                // ID standard: 12.000,50 -> strip dot, comma to dot
+                // Format ID: 12.000,50 -> hilangkan titik, ubah koma ke titik
                 $clean = str_replace('.', '', $clean);
                 $clean = str_replace(',', '.', $clean);
             }
@@ -163,29 +169,60 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
             return (float) $clean;
         }
 
+        // Kasus 2: Hanya mengandung koma (misal: "10,500" ribuan atau "10,50" desimal)
         if ($hasComma) {
-            // Check if comma is thousand separator (e.g. 10,500 or 1,250,000)
-            if (preg_match('/,(\d{3})(?:$|,)/', $clean)) {
+            // Jika ada lebih dari satu koma, pasti pemisah ribuan (misal: "1,250,000")
+            if (substr_count($clean, ',') > 1) {
+                $clean = str_replace(',', '', $clean);
+
+                return (float) $clean;
+            }
+
+            $parts = explode(',', $clean);
+            $before = $parts[0];
+            $after = $parts[1] ?? '';
+
+            // Jika 1-3 digit di depan dan tepat 3 digit di belakang (misal: "10,500") -> ribuan
+            if (strlen($before) <= 3 && strlen($after) === 3) {
                 $clean = str_replace(',', '', $clean);
             } else {
+                // Desimal (misal: "10,50", "4450,545") -> ubah ke titik
                 $clean = str_replace(',', '.', $clean);
             }
 
             return (float) $clean;
         }
 
+        // Kasus 3: Hanya mengandung titik (misal: "15.000", "4450.545", "1.500.000")
         if ($hasDot) {
-            // Check if dot is decimal (e.g. 23310.00 or 150.50)
-            if (preg_match('/\.\d{2}$/', $clean)) {
-                return (float) $clean;
-            }
-
-            // Check if dot is thousand separator (e.g. 11.000 or 1.500.000)
-            if (preg_match('/\.\d{3}(?:\.|$)/', $clean)) {
+            // Jika ada lebih dari satu titik, pasti pemisah ribuan (misal: "1.500.000")
+            if (substr_count($clean, '.') > 1) {
                 $clean = str_replace('.', '', $clean);
 
                 return (float) $clean;
             }
+
+            $parts = explode('.', $clean);
+            $before = $parts[0];
+            $after = $parts[1] ?? '';
+
+            // JIKA DIGIT DI DEPAN TITIK > 3 (misal: "4450.545", "29761.875", "447638.025"):
+            // Pemisah ribuan TIDAK PERNAH memiliki 4 digit atau lebih di depan titik tanpa separator!
+            // Ini 100% adalah tanda desimal (pecahan hasil rumus Excel).
+            if (strlen($before) > 3) {
+                return (float) $clean;
+            }
+
+            // Jika 1-3 digit di depan dan tepat 3 digit di belakang (misal: "15.000", "250.000"):
+            // Pada katalog harga obat Indonesia, ini adalah ribuan Rupiah.
+            if (strlen($before) <= 3 && strlen($after) === 3) {
+                $clean = str_replace('.', '', $clean);
+
+                return (float) $clean;
+            }
+
+            // Sisanya (misal: "15.5", "15.50", "15.0000") adalah desimal.
+            return (float) $clean;
         }
 
         return (float) $clean;
