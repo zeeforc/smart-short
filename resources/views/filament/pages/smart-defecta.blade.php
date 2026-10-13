@@ -1,6 +1,170 @@
 <x-filament-panels::page>
     {{ $this->table }}
 
+    <script>
+        window.smartDefectaHub = function(config) {
+            return {
+                perPage: config ? (config.perPage || 10) : 10,
+                currentPage: 1,
+                total: config ? (config.total || 0) : 0,
+                get totalPages() { return Math.ceil(this.total / this.perPage) || 1; },
+                get start() { return (this.currentPage - 1) * this.perPage; },
+                get end() { return Math.min(this.currentPage * this.perPage, this.total); },
+                isVisible(index) { return index >= this.start && index < this.end; },
+                pages() {
+                    let p = [];
+                    for (let i = 1; i <= this.totalPages; i++) p.push(i);
+                    return p;
+                },
+
+                // Modal State
+                isModalOpen: false,
+                modalFilter: '',
+                isSubmitting: false,
+                items: (config && config.initialBatch) ? config.initialBatch : [],
+
+                openModal(cardId = null) {
+                    this.isModalOpen = true;
+                    this.modalFilter = '';
+                    document.body.classList.add('overflow-hidden');
+
+                    if (cardId) {
+                        this.$nextTick(() => {
+                            const el = document.getElementById(cardId);
+                            if (el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                el.classList.add('sd-highlight-pulse');
+                                setTimeout(() => el.classList.remove('sd-highlight-pulse'), 2500);
+                            }
+                        });
+                    }
+                },
+
+                closeModal() {
+                    this.isModalOpen = false;
+                    document.body.classList.remove('overflow-hidden');
+                },
+
+                filteredItems() {
+                    if (!this.modalFilter || this.modalFilter.trim() === '') {
+                        return this.items;
+                    }
+                    const q = this.modalFilter.toLowerCase().trim();
+                    return this.items.filter(item => {
+                        const raw = (item.raw_name || '').toLowerCase();
+                        const sel = (item.selected_name || '').toLowerCase();
+                        return raw.includes(q) || sel.includes(q);
+                    });
+                },
+
+                countMatched() {
+                    return this.items.filter(i => i.action_type === 'match' && i.normalized_product_id).length;
+                },
+                countNotStocked() {
+                    return this.items.filter(i => i.action_type === 'not_stocked').length;
+                },
+                countUnlisted() {
+                    return this.items.filter(i => i.action_type === 'unlisted').length;
+                },
+                countSkipped() {
+                    return this.items.filter(i => i.action_type === 'skip' || (i.action_type === 'match' && !i.normalized_product_id)).length;
+                },
+
+                applyAllSuggestions() {
+                    this.items.forEach(item => {
+                        if (item.suggestions && item.suggestions.length > 0) {
+                            item.action_type = 'match';
+                            item.normalized_product_id = item.suggestions[0].id;
+                            item.selected_name = item.suggestions[0].name;
+                        }
+                    });
+                },
+
+                markAllEmptyAsNonPbf() {
+                    this.items.forEach(item => {
+                        if (!item.suggestions || item.suggestions.length === 0) {
+                            item.action_type = 'not_stocked';
+                        }
+                    });
+                },
+
+                setAllToSkip() {
+                    this.items.forEach(item => {
+                        item.action_type = 'skip';
+                    });
+                },
+
+                selectSuggestion(item, sugg) {
+                    item.action_type = 'match';
+                    item.normalized_product_id = sugg.id;
+                    item.selected_name = sugg.name;
+                },
+
+                async searchMasterProduct(item) {
+                    const q = item.search_query;
+                    if (!q || q.trim().length < 2) {
+                        item.search_results = [];
+                        return;
+                    }
+                    item.is_searching = true;
+                    try {
+                        const wireObj = this.$wire || (typeof $wire !== 'undefined' ? $wire : null);
+                        if (wireObj) {
+                            const res = await wireObj.searchNormalizedProducts(q);
+                            item.search_results = res || [];
+                        }
+                    } catch (err) {
+                        console.error(err);
+                    } finally {
+                        item.is_searching = false;
+                    }
+                },
+
+                chooseSearchResult(item, prod) {
+                    item.action_type = 'match';
+                    item.normalized_product_id = prod.id;
+                    item.selected_name = prod.name;
+                    item.search_results = [];
+                    item.show_search = false;
+                    item.search_query = '';
+                },
+
+                async submitBatchDecisions() {
+                    const toProcess = this.items.filter(i => i.action_type !== 'skip');
+                    if (toProcess.length === 0) {
+                        alert('Pilih setidaknya 1 obat untuk dicocokkan atau ditandai bukan PBF.');
+                        return;
+                    }
+                    this.isSubmitting = true;
+                    try {
+                        const payload = this.items.map(i => ({
+                            raw_name: i.raw_name,
+                            action_type: i.action_type,
+                            normalized_product_id: i.normalized_product_id
+                        }));
+                        const wireObj = this.$wire || (typeof $wire !== 'undefined' ? $wire : null);
+                        if (wireObj) {
+                            await wireObj.saveBatchMatching(payload);
+                        }
+                        this.closeModal();
+                    } catch (err) {
+                        console.error(err);
+                    } finally {
+                        this.isSubmitting = false;
+                    }
+                }
+            };
+        };
+
+        if (window.Alpine) {
+            window.Alpine.data('smartDefectaHub', (config) => window.smartDefectaHub(config));
+        } else {
+            document.addEventListener('alpine:init', () => {
+                window.Alpine.data('smartDefectaHub', (config) => window.smartDefectaHub(config));
+            });
+        }
+    </script>
+
     @if($calculationResults !== null)
         @php
             $totalItems   = count($calculationResults);
@@ -1194,164 +1358,6 @@
             }
         </style>
 
-        <script>
-            window.smartDefectaHub = function(config) {
-                return {
-                    perPage: config.perPage || 10,
-                    currentPage: 1,
-                    total: config.total || 0,
-                    get totalPages() { return Math.ceil(this.total / this.perPage) || 1; },
-                    get start() { return (this.currentPage - 1) * this.perPage; },
-                    get end() { return Math.min(this.currentPage * this.perPage, this.total); },
-                    isVisible(index) { return index >= this.start && index < this.end; },
-                    pages() {
-                        let p = [];
-                        for (let i = 1; i <= this.totalPages; i++) p.push(i);
-                        return p;
-                    },
-
-                    // Modal State
-                    isModalOpen: false,
-                    modalFilter: '',
-                    isSubmitting: false,
-                    items: config.initialBatch || [],
-
-                    openModal(cardId = null) {
-                        this.isModalOpen = true;
-                        this.modalFilter = '';
-                        document.body.classList.add('overflow-hidden');
-
-                        if (cardId) {
-                            this.$nextTick(() => {
-                                const el = document.getElementById(cardId);
-                                if (el) {
-                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    el.classList.add('sd-highlight-pulse');
-                                    setTimeout(() => el.classList.remove('sd-highlight-pulse'), 2500);
-                                }
-                            });
-                        }
-                    },
-
-                    closeModal() {
-                        this.isModalOpen = false;
-                        document.body.classList.remove('overflow-hidden');
-                    },
-
-                    filteredItems() {
-                        if (!this.modalFilter || this.modalFilter.trim() === '') {
-                            return this.items;
-                        }
-                        const q = this.modalFilter.toLowerCase().trim();
-                        return this.items.filter(item => {
-                            const raw = (item.raw_name || '').toLowerCase();
-                            const sel = (item.selected_name || '').toLowerCase();
-                            return raw.includes(q) || sel.includes(q);
-                        });
-                    },
-
-                    countMatched() {
-                        return this.items.filter(i => i.action_type === 'match' && i.normalized_product_id).length;
-                    },
-                    countNotStocked() {
-                        return this.items.filter(i => i.action_type === 'not_stocked').length;
-                    },
-                    countUnlisted() {
-                        return this.items.filter(i => i.action_type === 'unlisted').length;
-                    },
-                    countSkipped() {
-                        return this.items.filter(i => i.action_type === 'skip' || (i.action_type === 'match' && !i.normalized_product_id)).length;
-                    },
-
-                    applyAllSuggestions() {
-                        this.items.forEach(item => {
-                            if (item.suggestions && item.suggestions.length > 0) {
-                                item.action_type = 'match';
-                                item.normalized_product_id = item.suggestions[0].id;
-                                item.selected_name = item.suggestions[0].name;
-                            }
-                        });
-                    },
-
-                    markAllEmptyAsNonPbf() {
-                        this.items.forEach(item => {
-                            if (!item.suggestions || item.suggestions.length === 0) {
-                                item.action_type = 'not_stocked';
-                            }
-                        });
-                    },
-
-                    setAllToSkip() {
-                        this.items.forEach(item => {
-                            item.action_type = 'skip';
-                        });
-                    },
-
-                    selectSuggestion(item, sugg) {
-                        item.action_type = 'match';
-                        item.normalized_product_id = sugg.id;
-                        item.selected_name = sugg.name;
-                    },
-
-                    async searchMasterProduct(item) {
-                        const q = item.search_query;
-                        if (!q || q.trim().length < 2) {
-                            item.search_results = [];
-                            return;
-                        }
-                        item.is_searching = true;
-                        try {
-                            const res = await this.$wire.searchNormalizedProducts(q);
-                            item.search_results = res || [];
-                        } catch (err) {
-                            console.error(err);
-                        } finally {
-                            item.is_searching = false;
-                        }
-                    },
-
-                    chooseSearchResult(item, prod) {
-                        item.action_type = 'match';
-                        item.normalized_product_id = prod.id;
-                        item.selected_name = prod.name;
-                        item.search_results = [];
-                        item.show_search = false;
-                        item.search_query = '';
-                    },
-
-                    async submitBatchDecisions() {
-                        const toProcess = this.items.filter(i => i.action_type !== 'skip');
-                        if (toProcess.length === 0) {
-                            alert('Pilih setidaknya 1 obat untuk dicocokkan atau ditandai bukan PBF.');
-                            return;
-                        }
-                        this.isSubmitting = true;
-                        try {
-                            const payload = this.items.map(i => ({
-                                raw_name: i.raw_name,
-                                action_type: i.action_type,
-                                normalized_product_id: i.normalized_product_id
-                            }));
-                            await this.$wire.saveBatchMatching(payload);
-                            this.closeModal();
-                        } catch (err) {
-                            console.error(err);
-                        } finally {
-                            this.isSubmitting = false;
-                        }
-                    }
-                };
-            };
-
-            if (window.Alpine) {
-                window.Alpine.data('smartDefectaHub', (config) => window.smartDefectaHub(config));
-            } else {
-                document.addEventListener('alpine:init', () => {
-                    window.Alpine.data('smartDefectaHub', (config) => window.smartDefectaHub(config));
-                });
-            }
-        </script>
-
         <div class="sd-section" x-data="smartDefectaHub({
             perPage: 10,
             total: {{ $totalItems }},
@@ -1920,6 +1926,15 @@
                         </div>
                     </div>
                 </div>
+            </div>
         </div>
     @endif
+
+    @script
+    <script>
+        if (typeof window.smartDefectaHub === 'function' && window.Alpine) {
+            window.Alpine.data('smartDefectaHub', (config) => window.smartDefectaHub(config));
+        }
+    </script>
+    @endscript
 </x-filament-panels::page>
