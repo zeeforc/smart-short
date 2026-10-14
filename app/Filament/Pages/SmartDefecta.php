@@ -407,12 +407,14 @@ class SmartDefecta extends Page implements HasTable
                         ->success()
                         ->send();
                 } else {
+                    $targetProduct = NormalizedProduct::find($data['normalized_product_id']);
                     ProductAlias::updateOrCreate(
                         ['alias_normalized' => $parsed['canonical']],
                         [
                             'alias_raw' => $rawName,
                             'status' => 'matched',
                             'normalized_product_id' => $data['normalized_product_id'],
+                            'target_canonical' => $targetProduct?->normalized_name,
                         ]
                     );
 
@@ -565,12 +567,14 @@ class SmartDefecta extends Page implements HasTable
                     $unlistedCount++;
                     $recalculateNames[] = $rawName;
                 } elseif ($actionType === 'match' && $productId) {
+                    $targetProduct = NormalizedProduct::find($productId);
                     ProductAlias::updateOrCreate(
                         ['alias_normalized' => $canonical],
                         [
                             'alias_raw' => $rawName,
                             'status' => 'matched',
                             'normalized_product_id' => $productId,
+                            'target_canonical' => $targetProduct?->normalized_name,
                         ]
                     );
                     $matchedCount++;

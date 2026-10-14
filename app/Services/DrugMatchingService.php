@@ -33,6 +33,7 @@ class DrugMatchingService
 
         // 1. Cek Alias Terverifikasi (Kamus Manual / Tersimpan Sebelumnya)
         $alias = ProductAlias::where('alias_normalized', $canonical)
+            ->orWhere('alias_raw', $rawName)
             ->orWhere('alias_raw', $cleanRaw)
             ->first();
 
@@ -59,8 +60,22 @@ class DrugMatchingService
                 ];
             }
 
-            if ($alias->normalizedProduct) {
-                $product = $alias->normalizedProduct;
+            $product = $alias->normalizedProduct;
+
+            // Jika relasi ID terputus (misal karena pricelist di-reimport sehingga ID master berubah),
+            // pulihkan secara otomatis menggunakan target_canonical permanen!
+            if (! $product && ! empty($alias->target_canonical)) {
+                $product = NormalizedProduct::where('normalized_name', $alias->target_canonical)->first();
+                if ($product) {
+                    $alias->update(['normalized_product_id' => $product->id]);
+                }
+            }
+
+            if ($product) {
+                // Backfill target_canonical jika sebelumnya belum tersimpan
+                if (empty($alias->target_canonical) && ! empty($product->normalized_name)) {
+                    $alias->update(['target_canonical' => $product->normalized_name]);
+                }
 
                 return [
                     'status' => 'alias',
@@ -182,6 +197,7 @@ class DrugMatchingService
                 [
                     'alias_raw' => $cleanRaw,
                     'normalized_product_id' => $best['product']->id,
+                    'target_canonical' => $best['product']->normalized_name,
                 ]
             );
 

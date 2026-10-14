@@ -75,10 +75,13 @@ class ProductAliasResource extends Resource
                         'unlisted' => '📦 Belum Dijual PBF',
                         default => '✅ Cocok ke PBF',
                     }),
-                Tables\Columns\TextColumn::make('normalizedProduct.parsed_name')
+                Tables\Columns\TextColumn::make('matched_target')
                     ->label('Dicocokkan Ke')
-                    ->placeholder('-')
-                    ->searchable(),
+                    ->getStateUsing(fn (ProductAlias $record) => $record->normalizedProduct ? trim("{$record->normalizedProduct->parsed_name} {$record->normalizedProduct->parsed_strength}") : ($record->target_canonical ?? '-'))
+                    ->searchable(query: function ($query, string $search) {
+                        $query->whereHas('normalizedProduct', fn ($q) => $q->where('parsed_name', 'like', "%{$search}%"))
+                            ->orWhere('target_canonical', 'like', "%{$search}%");
+                    }),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()

@@ -444,6 +444,7 @@ class DrugMatchingTest extends TestCase
             'alias_raw' => 'BIOLYSIN SYR 60 ML',
             'status' => 'matched',
             'normalized_product_id' => $p1->id,
+            'target_canonical' => $p1->normalized_name,
         ]);
 
         $this->assertDatabaseHas('product_aliases', [
@@ -460,6 +461,38 @@ class DrugMatchingTest extends TestCase
 
         $this->assertDatabaseMissing('product_aliases', [
             'alias_raw' => 'OBAT DILEWATI',
+        ]);
+    }
+
+    public function test_alias_auto_relinks_using_target_canonical_when_normalized_product_id_is_lost(): void
+    {
+        $product = NormalizedProduct::create([
+            'normalized_name' => 'PARACETAMOL|500MG|TAB',
+            'parsed_name' => 'PARACETAMOL',
+            'parsed_strength' => '500MG',
+            'parsed_form' => 'TAB',
+            'lowest_price' => 5000,
+        ]);
+
+        // Simulasikan alias yang ID-nya terputus (null) karena re-import, tetapi punya target_canonical
+        $alias = ProductAlias::create([
+            'alias_raw' => 'PCT 500 MG TAB',
+            'alias_normalized' => 'PCT|500MG|TAB',
+            'status' => 'matched',
+            'normalized_product_id' => null,
+            'target_canonical' => 'PARACETAMOL|500MG|TAB',
+        ]);
+
+        $res = $this->matcher->match('PCT 500 MG TAB');
+
+        $this->assertSame('alias', $res['status']);
+        $this->assertEquals(100.0, $res['confidence']);
+        $this->assertEquals($product->id, $res['product']->id);
+
+        // Pastikan relasi ID berhasil dipulihkan (auto-relinked) di database
+        $this->assertDatabaseHas('product_aliases', [
+            'id' => $alias->id,
+            'normalized_product_id' => $product->id,
         ]);
     }
 
