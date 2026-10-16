@@ -264,12 +264,8 @@ class DrugMatchingService
         $runnerUp = $scoredCandidates[1] ?? null;
         $totalCandidates = count($scoredCandidates);
 
-        // Kriteria Auto-Match: Skor >= 85% dan tidak terlalu ambigu (gap >= 5% atau kandidat tunggal dominan)
-        $isDominant = $runnerUp === null
-            || ($best['confidence'] - $runnerUp['confidence'] >= 5.0)
-            || ($best['confidence'] >= 90.0);
-
-        if ($best['confidence'] >= 85.0 && $isDominant) {
+        // Kriteria Auto-Match: Skor >= 80% langsung di-ACC otomatis oleh bot
+        if ($best['confidence'] >= 80.0) {
             ProductAlias::firstOrCreate(
                 ['alias_normalized' => $canonical],
                 [
@@ -695,12 +691,17 @@ class DrugMatchingService
             }
         }
 
-        // Jika request punya lebih dari 1 token signifikan (misal: "ASAM MEFENAMAT"),
-        // cek apakah ada token signifikan lain yang cocok
-        if (count($reqSigTokens) > 1) {
-            foreach ($reqSigTokens as $reqTok) {
-                foreach ($candSigTokens as $candTok) {
-                    if ($reqTok === $candTok) {
+        // Jika request punya lebih dari 1 token signifikan dan token pertama adalah prefiks generik (misal: "ASAM MEFENAMAT"),
+        // periksa kecocokan token senyawa aktif kedua
+        $genericPrefixes = ['ASAM', 'MINYAK', 'BEDAK', 'TETES', 'SALEP', 'SERUM', 'EKSTRAK', 'SARI'];
+        if (in_array($primaryReq, $genericPrefixes, true) && count($reqSigTokens) > 1) {
+            $secondaryReq = $reqSigTokens[1];
+            foreach ($candSigTokens as $candTok) {
+                if ($secondaryReq === $candTok) {
+                    return true;
+                }
+                if (mb_strlen($secondaryReq) >= 5 && mb_strlen($candTok) >= 5) {
+                    if (str_contains($candTok, $secondaryReq) || str_contains($secondaryReq, $candTok) || levenshtein($secondaryReq, $candTok) <= 1) {
                         return true;
                     }
                 }

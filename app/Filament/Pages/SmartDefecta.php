@@ -686,6 +686,21 @@ class SmartDefecta extends Page implements HasTable
                 }
             }
 
+            // Jika candidates kosong dari serialisasi memori, ambil dari DrugMatchingService
+            if (empty($candidates)) {
+                $tempMatch = app(DrugMatchingService::class)->match($rawName, false);
+                foreach ($tempMatch['suggestions'] ?? [] as $s) {
+                    $productId = $s['product_id'] ?? ($s['product']->id ?? null);
+                    if ($productId) {
+                        $candidates[] = [
+                            'id' => (int) $productId,
+                            'name' => (string) ($s['name'] ?? ''),
+                            'confidence' => (float) ($s['confidence'] ?? 0),
+                        ];
+                    }
+                }
+            }
+
             if (! empty($candidates)) {
                 $toEvaluate[] = [
                     'raw_name' => $rawName,
