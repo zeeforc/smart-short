@@ -649,47 +649,155 @@ class SmartDefecta extends Page implements HasTable
             return;
         }
 
-        $matcher = app(DrugMatchingService::class);
-        $recalculated = [];
-        $aiMatchedCount = 0;
-        $autoMatchedCount = 0;
-        $notStockedCount = 0;
+        $normalizer = app(ProductNormalizationService::class);
 
-        foreach ($this->calculationResults as $idx => $res) {
+        // Kumpulkan item yang perlu diproses, gunakan kandidat yang sudah dihitung
+        $toEvaluate = [];    // item dengan kandidat dari kalkulasi sebelumnya
+        $toClassify = [];    // item tanpa kandidat sama sekali (perlu diklasifikasikan)
+
+        foreach ($this->calculationResults as $res) {
             $hasWinner = ! empty($res['calculation']['winner']);
             $status = $res['calculation']['match_info']['status'] ?? '';
 
-            if (! $hasWinner && $status !== 'unlisted' && $status !== 'not_stocked') {
-                $rawName = $res['request']['product_name'];
-                $match = $matcher->match($rawName, true);
+            if ($hasWinner || in_array($status, ['unlisted', 'not_stocked'])) {
+                continue;
+            }
 
-                $matchStatus = $match['status'] ?? '';
-                if ($matchStatus === 'ai_matched' && ! empty($match['product'])) {
-                    $recalculated[] = $rawName;
-                    $aiMatchedCount++;
-                } elseif ($matchStatus === 'auto_matched' && ! empty($match['product'])) {
-                    $recalculated[] = $rawName;
-                    $autoMatchedCount++;
-                } elseif ($matchStatus === 'not_stocked') {
+            $rawName = $res['request']['product_name'];
+            $suggestions = $res['calculation']['match_info']['suggestions'] ?? [];
+
+            // Ekstrak kandidat dari suggestion yang sudah dihitung — hindari re-query DB
+            $candidates = [];
+            foreach ($suggestions as $s) {
+                // product_id ditambahkan secara eksplisit di DrugMatchingService agar survive Livewire serialization
+                $productId = $s['product_id'] ?? null;
+                if (! $productId && isset($s['product'])) {
+                    $productId = is_array($s['product'])
+                        ? ($s['product']['id'] ?? null)
+                        : ($s['product']->id ?? null);
+                }
+
+                if ($productId) {
+                    $candidates[] = [
+                        'id' => (int) $productId,
+                        'name' => (string) ($s['name'] ?? ''),
+                        'confidence' => (float) ($s['confidence'] ?? 0),
+                    ];
+                }
+            }
+
+            if (! empty($candidates)) {
+                $toEvaluate[] = [
+                    'raw_name' => $rawName,
+                    'candidates' => $candidates,
+                ];
+            } else {
+                $toClassify[] = $rawName;
+            }
+        }
+
+        $aiMatchedCount = 0;
+        $notStockedCount = 0;
+        $unlistedCount = 0;
+        $recalculated = [];
+
+        // Proses item yang punya kandidat — batch 5 per API call
+        $evaluateBatches = array_chunk($toEvaluate, 5);
+        foreach ($evaluateBatches as $batch) {
+            $batchResults = $aiService->matchDrugsBatch($batch);
+
+            foreach ($batchResults as $rawName => $result) {
+                $decision = $result['decision'] ?? 'ambiguous';
+
+                if ($decision === 'matched' && ! empty($result['matched_id'])) {
+                    $product = NormalizedProduct::find($result['matched_id']);
+                    if ($product) {
+                        $parsed = $normalizer->parseDrugName($rawName, '');
+                        ProductAlias::firstOrCreate(
+                            ['alias_normalized' => $parsed['canonical']],
+                            [
+                                'alias_raw' => $rawName,
+                                'normalized_product_id' => $product->id,
+                                'target_canonical' => $product->normalized_name,
+                            ]
+                        );
+                        $recalculated[] = $rawName;
+                        $aiMatchedCount++;
+                    }
+                } elseif ($decision === 'not_stocked') {
+                    $parsed = $normalizer->parseDrugName($rawName, '');
+                    ProductAlias::firstOrCreate(
+                        ['alias_normalized' => $parsed['canonical']],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'not_stocked',
+                            'normalized_product_id' => null,
+                        ]
+                    );
                     $recalculated[] = $rawName;
                     $notStockedCount++;
+                } elseif ($decision === 'unlisted') {
+                    $parsed = $normalizer->parseDrugName($rawName, '');
+                    ProductAlias::firstOrCreate(
+                        ['alias_normalized' => $parsed['canonical']],
+                        [
+                            'alias_raw' => $rawName,
+                            'status' => 'unlisted',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+                    $recalculated[] = $rawName;
+                    $unlistedCount++;
                 }
             }
         }
 
-        $totalProcessed = $aiMatchedCount + $autoMatchedCount + $notStockedCount;
-        if ($totalProcessed > 0) {
-            $this->recalculateMultipleItems($recalculated);
+        // Proses item tanpa kandidat — batch 8 per API call
+        $classifyBatches = array_chunk($toClassify, 8);
+        foreach ($classifyBatches as $batch) {
+            $batchResults = $aiService->classifyUnmatchedBatch($batch);
 
+            foreach ($batchResults as $rawName => $result) {
+                $decision = $result['decision'] ?? 'ambiguous';
+                if ($decision === 'ambiguous') {
+                    continue;
+                }
+
+                $parsed = $normalizer->parseDrugName($rawName, '');
+                ProductAlias::firstOrCreate(
+                    ['alias_normalized' => $parsed['canonical']],
+                    [
+                        'alias_raw' => $rawName,
+                        'status' => $decision,
+                        'normalized_product_id' => null,
+                    ]
+                );
+                $recalculated[] = $rawName;
+
+                if ($decision === 'not_stocked') {
+                    $notStockedCount++;
+                } else {
+                    $unlistedCount++;
+                }
+            }
+        }
+
+        $totalProcessed = $aiMatchedCount + $notStockedCount + $unlistedCount;
+
+        if (! empty($recalculated)) {
+            $this->recalculateMultipleItems($recalculated);
+        }
+
+        if ($totalProcessed > 0) {
             $messages = [];
             if ($aiMatchedCount > 0) {
                 $messages[] = "{$aiMatchedCount} cocok via AI";
             }
-            if ($autoMatchedCount > 0) {
-                $messages[] = "{$autoMatchedCount} cocok otomatis katalog";
-            }
             if ($notStockedCount > 0) {
-                $messages[] = "{$notStockedCount} ditandai Bukan Stok PBF (Alkes/Non-PBF)";
+                $messages[] = "{$notStockedCount} ditandai Bukan Stok PBF";
+            }
+            if ($unlistedCount > 0) {
+                $messages[] = "{$unlistedCount} ditandai Belum Ada Distributor";
             }
 
             Notification::make()
@@ -698,9 +806,10 @@ class SmartDefecta extends Page implements HasTable
                 ->success()
                 ->send();
         } else {
+            $remainingCount = count($toEvaluate) + count($toClassify);
             Notification::make()
                 ->title('AI belum menemukan kecocokan baru')
-                ->body('Kandidat yang tersedia belum ada yang memenuhi 4 kriteria ketat kecocokan.')
+                ->body("Dari {$remainingCount} item yang dievaluasi, belum ada yang memenuhi kriteria kecocokan. Silakan cocokkan manual.")
                 ->info()
                 ->send();
         }

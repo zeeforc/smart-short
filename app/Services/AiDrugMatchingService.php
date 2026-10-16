@@ -308,4 +308,206 @@ Kembalikan HANYA format JSON valid berikut:
 }
 PROMPT;
     }
+
+    /**
+     * Cocokkan banyak obat sekaligus dalam satu API call (batch matching).
+     * Jauh lebih efisien daripada memanggil matchDrug() satu per satu.
+     *
+     * @param  array<int, array{raw_name: string, candidates: array<int, array{id: int, name: string, confidence: float}>}>  $items
+     * @return array<string, array{decision: string, matched_id: ?int, confidence: float, reason: string}>
+     */
+    public function matchDrugsBatch(array $items): array
+    {
+        if (! $this->isAvailable() || empty($items)) {
+            return [];
+        }
+
+        $count = count($items);
+        $itemsText = '';
+        foreach ($items as $i => $item) {
+            $idx = $i + 1;
+            $itemsText .= "Obat {$idx}: \"{$item['raw_name']}\"\n";
+            foreach ($item['candidates'] as $cand) {
+                $itemsText .= "  - ID:{$cand['id']} | {$cand['name']} (skor:{$cand['confidence']}%)\n";
+            }
+            $itemsText .= "\n";
+        }
+
+        $prompt = "Cocokkan {$count} obat defecta apotek Indonesia ke katalog PBF. Gunakan 4 kriteria ketat:\n"
+            ."1. SEDIAAN: TAB/KAP/KAPL=solid | SYR/SUS=cair | SALEP/KRIM=topikal | INJ=injeksi. DILARANG silang sediaan.\n"
+            ."2. DOSIS/VOLUME: harus kompatibel (mg, ml, gr).\n"
+            ."3. NAMA DAGANG: abaikan suffix PBF (NORETUR, NORET, 'IFR', 'BER', 'GLX', /50, /100). Nama merek = produk sama.\n"
+            ."4. TIDAK COCOK: gunakan \"ambiguous\" jika ragu, \"not_stocked\" jika alkes/non-obat.\n\n"
+            ."{$itemsText}"
+            ."Kembalikan HANYA JSON (satu hasil per nomor obat):\n"
+            ."{\"results\":[{\"index\":1,\"decision\":\"matched\",\"matched_id\":<int_atau_null>,\"confidence\":<0-100>,\"reason\":\"<singkat>\"},...]}'\n"
+            .'Decision valid: "matched" | "not_stocked" | "unlisted" | "ambiguous"';
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$this->apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout($this->timeout + ($count * 3))->post('https://api.groq.com/openai/v1/chat/completions', [
+                'model' => $this->model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'Kamu adalah sistem pencocokan obat farmasi Indonesia yang akurat. Selalu kembalikan JSON valid sesuai format yang diminta.',
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $prompt,
+                    ],
+                ],
+                'response_format' => ['type' => 'json_object'],
+                'temperature' => 0.1,
+                'max_tokens' => 150 + ($count * 80),
+            ]);
+
+            if (! $response->successful()) {
+                Log::warning('AiDrugMatchingService batch match failed', [
+                    'status' => $response->status(),
+                    'body' => substr($response->body(), 0, 300),
+                    'items_count' => $count,
+                ]);
+
+                return [];
+            }
+
+            $json = $response->json();
+            $content = $json['choices'][0]['message']['content'] ?? null;
+            if (! $content) {
+                return [];
+            }
+
+            $parsed = json_decode($content, true);
+            if (! isset($parsed['results']) || ! is_array($parsed['results'])) {
+                return [];
+            }
+
+            $output = [];
+            foreach ($parsed['results'] as $result) {
+                $idx = (int) ($result['index'] ?? 0) - 1;
+                if (! isset($items[$idx])) {
+                    continue;
+                }
+
+                $output[$items[$idx]['raw_name']] = [
+                    'decision' => (string) ($result['decision'] ?? 'ambiguous'),
+                    'matched_id' => isset($result['matched_id']) && is_numeric($result['matched_id'])
+                        ? (int) $result['matched_id']
+                        : null,
+                    'confidence' => (float) ($result['confidence'] ?? 0),
+                    'reason' => (string) ($result['reason'] ?? ''),
+                ];
+            }
+
+            return $output;
+
+        } catch (\Throwable $e) {
+            Log::error('AiDrugMatchingService batch match exception: '.$e->getMessage(), [
+                'items_count' => $count,
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * Klasifikasikan banyak nama produk tanpa kandidat (not_stocked vs unlisted) dalam satu API call.
+     *
+     * @param  array<int, string>  $rawNames
+     * @return array<string, array{decision: string, confidence: float, reason: string}>
+     */
+    public function classifyUnmatchedBatch(array $rawNames): array
+    {
+        if (! $this->isAvailable() || empty($rawNames)) {
+            return [];
+        }
+
+        $count = count($rawNames);
+        $listText = '';
+        foreach ($rawNames as $i => $name) {
+            $listText .= ($i + 1).". \"{$name}\"\n";
+        }
+
+        $prompt = "Klasifikasikan {$count} item berikut dari pesanan apotek Indonesia (tidak ditemukan di katalog PBF):\n\n"
+            ."{$listText}\n"
+            ."Tentukan setiap item:\n"
+            ."- \"not_stocked\": Alkes/non-obat (pantyliner, celana khitan, kasa, spuit, masker, handscoon, dll)\n"
+            ."- \"unlisted\": Obat farmasi yang belum ada di distributor rekanan\n"
+            ."- \"ambiguous\": Tidak dapat ditentukan\n\n"
+            ."Kembalikan JSON:\n"
+            .'{"results":[{"index":1,"decision":"not_stocked","confidence":95,"reason":"<singkat>"},...]}';
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$this->apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout($this->timeout + ($count * 2))->post('https://api.groq.com/openai/v1/chat/completions', [
+                'model' => $this->model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'Kamu adalah sistem klasifikasi produk farmasi apotek Indonesia. Kembalikan HANYA format JSON valid.',
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $prompt,
+                    ],
+                ],
+                'response_format' => ['type' => 'json_object'],
+                'temperature' => 0.1,
+                'max_tokens' => 80 + ($count * 50),
+            ]);
+
+            if (! $response->successful()) {
+                Log::warning('AiDrugMatchingService classify batch failed', [
+                    'status' => $response->status(),
+                    'items_count' => $count,
+                ]);
+
+                return [];
+            }
+
+            $json = $response->json();
+            $content = $json['choices'][0]['message']['content'] ?? null;
+            if (! $content) {
+                return [];
+            }
+
+            $parsed = json_decode($content, true);
+            if (! isset($parsed['results']) || ! is_array($parsed['results'])) {
+                return [];
+            }
+
+            $output = [];
+            foreach ($parsed['results'] as $result) {
+                $idx = (int) ($result['index'] ?? 0) - 1;
+                if (! isset($rawNames[$idx])) {
+                    continue;
+                }
+
+                $decision = (string) ($result['decision'] ?? 'ambiguous');
+                if (! in_array($decision, ['not_stocked', 'unlisted', 'ambiguous'])) {
+                    $decision = 'ambiguous';
+                }
+
+                $output[$rawNames[$idx]] = [
+                    'decision' => $decision,
+                    'confidence' => (float) ($result['confidence'] ?? 0),
+                    'reason' => (string) ($result['reason'] ?? ''),
+                ];
+            }
+
+            return $output;
+
+        } catch (\Throwable $e) {
+            Log::error('AiDrugMatchingService classify batch exception: '.$e->getMessage(), [
+                'items_count' => $count,
+            ]);
+
+            return [];
+        }
+    }
 }

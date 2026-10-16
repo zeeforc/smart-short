@@ -191,6 +191,7 @@ class DrugMatchingService
             // Ambang batas ketat: hanya simpan jika skor >= 70% dan brand terverifikasi cocok
             if ($score >= 70.0) {
                 $scoredCandidates[] = [
+                    'product_id' => $candidate->id,
                     'product' => $candidate,
                     'name' => trim("{$candidate->parsed_name} {$candidate->parsed_strength}"),
                     'confidence' => round($score, 1),
@@ -263,10 +264,10 @@ class DrugMatchingService
         $runnerUp = $scoredCandidates[1] ?? null;
         $totalCandidates = count($scoredCandidates);
 
-        // Kriteria Auto-Match: Skor >= 85% dan bukan kasus ambigu yang terlalu berdekatan
+        // Kriteria Auto-Match: Skor >= 85% dan tidak terlalu ambigu (gap >= 5% atau kandidat tunggal dominan)
         $isDominant = $runnerUp === null
-            || ($best['confidence'] - $runnerUp['confidence'] >= 8.0)
-            || ($best['confidence'] >= 94.0);
+            || ($best['confidence'] - $runnerUp['confidence'] >= 5.0)
+            || ($best['confidence'] >= 90.0);
 
         if ($best['confidence'] >= 85.0 && $isDominant) {
             ProductAlias::firstOrCreate(
