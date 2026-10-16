@@ -7,6 +7,8 @@ use App\Imports\SmartDefectaImport;
 use App\Models\DefectaItem;
 use App\Models\NormalizedProduct;
 use App\Models\ProductAlias;
+use App\Services\AiDrugMatchingService;
+use App\Services\DrugMatchingService;
 use App\Services\OrderCalculationService;
 use App\Services\ProductNormalizationService;
 use Filament\Actions\Action;
@@ -222,17 +224,27 @@ class SmartDefecta extends Page implements HasTable
         $foundCount = collect($results)->filter(fn ($r) => ! empty($r['calculation']['winner']))->count();
         $missingCount = $totalItems - $foundCount;
         $autoCount = collect($results)->filter(fn ($r) => ($r['calculation']['match_info']['status'] ?? '') === 'auto_matched')->count();
+        $aiCount = collect($results)->filter(fn ($r) => ($r['calculation']['match_info']['status'] ?? '') === 'ai_matched')->count();
+
+        $notes = [];
+        if ($autoCount > 0) {
+            $notes[] = "⚡ {$autoCount} auto-matched";
+        }
+        if ($aiCount > 0) {
+            $notes[] = "🤖 {$aiCount} cocok via AI";
+        }
+        $noteBody = ! empty($notes) ? implode(' | ', $notes) : null;
 
         if ($missingCount > 0) {
             Notification::make()
                 ->title("Kalkulasi selesai: {$foundCount} obat cocok, {$missingCount} butuh dicocokkan")
-                ->body($autoCount > 0 ? "⚡ {$autoCount} obat berhasil dicocokkan otomatis oleh sistem." : null)
+                ->body($noteBody)
                 ->warning()
                 ->send();
         } else {
             Notification::make()
                 ->title("Kalkulasi berhasil: Semua ({$foundCount}) obat terhubung!")
-                ->body($autoCount > 0 ? "⚡ {$autoCount} obat dicocokkan secara otomatis." : null)
+                ->body($noteBody)
                 ->success()
                 ->send();
         }
@@ -617,6 +629,59 @@ class SmartDefecta extends Page implements HasTable
                 $qty = (int) ($res['request']['qty'] ?? 1);
                 $this->calculationResults[$idx]['calculation'] = $service->calculateBestSupplier($productName, $qty);
             }
+        }
+    }
+
+    public function runAiMatchingForUnmatched(): void
+    {
+        if (empty($this->calculationResults)) {
+            return;
+        }
+
+        $aiService = app(AiDrugMatchingService::class);
+        if (! $aiService->isAvailable()) {
+            Notification::make()
+                ->title('Groq API Key belum dikonfigurasi')
+                ->body('Pastikan GROQ_API_KEY sudah diatur di file .env')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $matcher = app(DrugMatchingService::class);
+        $recalculated = [];
+        $aiMatchedCount = 0;
+
+        foreach ($this->calculationResults as $idx => $res) {
+            $hasWinner = ! empty($res['calculation']['winner']);
+            $status = $res['calculation']['match_info']['status'] ?? '';
+
+            if (! $hasWinner && $status !== 'unlisted' && $status !== 'not_stocked') {
+                $rawName = $res['request']['product_name'];
+                $match = $matcher->match($rawName, true);
+
+                if (($match['status'] ?? '') === 'ai_matched' && ! empty($match['product'])) {
+                    $recalculated[] = $rawName;
+                    $aiMatchedCount++;
+                }
+            }
+        }
+
+        if ($aiMatchedCount > 0) {
+            $this->recalculateMultipleItems($recalculated);
+
+            Notification::make()
+                ->title("🤖 AI Berhasil Mencocokkan {$aiMatchedCount} Obat!")
+                ->body('Hasil pencocokan telah disimpan permanen ke Kamus Alias.')
+                ->success()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('AI belum menemukan kecocokan baru')
+                ->body('Kandidat yang tersedia belum ada yang sesuai dengan standar akurasi AI.')
+                ->info()
+                ->send();
         }
     }
 }

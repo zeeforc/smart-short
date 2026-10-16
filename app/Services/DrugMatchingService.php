@@ -8,9 +8,14 @@ use Illuminate\Support\Collection;
 
 class DrugMatchingService
 {
+    protected ?AiDrugMatchingService $aiService;
+
     public function __construct(
-        protected ProductNormalizationService $normalizer
-    ) {}
+        protected ProductNormalizationService $normalizer,
+        ?AiDrugMatchingService $aiService = null
+    ) {
+        $this->aiService = $aiService ?? app(AiDrugMatchingService::class);
+    }
 
     /**
      * @return array{
@@ -22,7 +27,7 @@ class DrugMatchingService
      *     reason: ?string
      * }
      */
-    public function match(string $rawName): array
+    public function match(string $rawName, bool $useAi = true): array
     {
         $cleanRaw = mb_strtolower(trim($rawName));
         $parsed = $this->normalizer->parseDrugName($rawName, '');
@@ -169,6 +174,34 @@ class DrugMatchingService
         }
 
         if (empty($scoredCandidates)) {
+            // Jika fuzzy score tidak mencapai 70% (misal singkatan/nama komersial), coba tanyakan ke AI jika ada kandidat dasar
+            if ($useAi && $this->aiService && $this->aiService->isAvailable() && $candidates->isNotEmpty()) {
+                $aiResult = $this->aiService->matchDrug($rawName, $candidates->take(8));
+                if ($aiResult && ! empty($aiResult['matched_id']) && ($aiResult['confidence'] ?? 0) >= 80.0) {
+                    $aiProduct = $aiResult['product'] ?? NormalizedProduct::find($aiResult['matched_id']);
+                    if ($aiProduct) {
+                        ProductAlias::firstOrCreate(
+                            ['alias_normalized' => $canonical],
+                            [
+                                'alias_raw' => $cleanRaw,
+                                'normalized_product_id' => $aiProduct->id,
+                                'target_canonical' => $aiProduct->normalized_name,
+                            ]
+                        );
+
+                        return [
+                            'status' => 'ai_matched',
+                            'product' => $aiProduct,
+                            'confidence' => $aiResult['confidence'],
+                            'total_candidates' => $candidates->count(),
+                            'matched_name' => trim("{$aiProduct->parsed_name} {$aiProduct->parsed_strength}"),
+                            'suggestions' => [],
+                            'reason' => 'Cocok via AI: '.($aiResult['reason'] ?? ''),
+                        ];
+                    }
+                }
+            }
+
             return [
                 'status' => 'unmatched',
                 'product' => null,
@@ -210,6 +243,39 @@ class DrugMatchingService
                 'suggestions' => array_slice($scoredCandidates, 0, 5),
                 'reason' => null,
             ];
+        }
+
+        // Konsultasikan ke AI untuk memutuskan varian terbaik jika ambigu
+        if ($useAi && $this->aiService && $this->aiService->isAvailable()) {
+            $aiCandidatePool = collect($scoredCandidates)->pluck('product')->filter();
+            if ($aiCandidatePool->isEmpty()) {
+                $aiCandidatePool = $candidates;
+            }
+
+            $aiResult = $this->aiService->matchDrug($rawName, $aiCandidatePool->take(6));
+            if ($aiResult && ! empty($aiResult['matched_id']) && ($aiResult['confidence'] ?? 0) >= 80.0) {
+                $aiProduct = $aiResult['product'] ?? NormalizedProduct::find($aiResult['matched_id']);
+                if ($aiProduct) {
+                    ProductAlias::firstOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $cleanRaw,
+                            'normalized_product_id' => $aiProduct->id,
+                            'target_canonical' => $aiProduct->normalized_name,
+                        ]
+                    );
+
+                    return [
+                        'status' => 'ai_matched',
+                        'product' => $aiProduct,
+                        'confidence' => $aiResult['confidence'],
+                        'total_candidates' => $totalCandidates,
+                        'matched_name' => trim("{$aiProduct->parsed_name} {$aiProduct->parsed_strength}"),
+                        'suggestions' => array_slice($scoredCandidates, 0, 5),
+                        'reason' => 'Cocok via AI: '.($aiResult['reason'] ?? ''),
+                    ];
+                }
+            }
         }
 
         $reason = $totalCandidates > 1
@@ -276,6 +342,35 @@ class DrugMatchingService
             $res = $tokenQuery->limit(200)->get();
             if ($res->isNotEmpty()) {
                 return $res;
+            }
+        }
+
+        // 4. Ekspansi singkatan umum farmasi Indonesia jika token awal cocok
+        $abbreviations = [
+            'PCT' => 'PARACETAMOL',
+            'PARACET' => 'PARACETAMOL',
+            'CTM' => 'CHLORPHENIRAMINE',
+            'GG' => 'GUAIFENESIN',
+            'AMOX' => 'AMOXICILLIN',
+            'ASMEF' => 'ASAM MEFENAMAT',
+            'METRO' => 'METRONIDAZOLE',
+            'CIPRO' => 'CIPROFLOXACIN',
+            'AMLO' => 'AMLODIPINE',
+            'SIMVA' => 'SIMVASTATIN',
+            'OMEP' => 'OMEPRAZOLE',
+            'LANSOP' => 'LANSOPRAZOLE',
+            'DEXA' => 'DEXAMETHASONE',
+            'SALBU' => 'SALBUTAMOL',
+            'OBH' => 'OBH',
+        ];
+
+        foreach ($reqTokens as $tok) {
+            if (isset($abbreviations[$tok])) {
+                $expanded = $abbreviations[$tok];
+                $expandedMatches = (clone $query)->where('parsed_name', 'like', '%'.$expanded.'%')->limit(50)->get();
+                if ($expandedMatches->isNotEmpty()) {
+                    return $expandedMatches;
+                }
             }
         }
 

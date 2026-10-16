@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'qwen/qwen3.8-27b'),
+        'timeout' => env('GROQ_TIMEOUT', 15),
+    ],
+
 ];

@@ -455,6 +455,16 @@
                 color: #818cf8;
                 border-color: rgba(79, 70, 229, 0.3);
             }
+            .sd-match-badge.ai {
+                background: #f3e8ff;
+                color: #7e22ce;
+                border: 1px solid #d8b4fe;
+            }
+            .dark .sd-match-badge.ai {
+                background: rgba(147, 51, 234, 0.15);
+                color: #c084fc;
+                border-color: rgba(147, 51, 234, 0.3);
+            }
             .sd-match-badge.nonpbf {
                 background: #f3f4f6;
                 color: #4b5563;
@@ -1444,17 +1454,39 @@
                                 <p class="sd-alert-sub">Obat berikut tidak lolos auto-match $\ge$ 85% dan butuh konfirmasi manual atau ditandai bukan stok PBF:</p>
                             </div>
                         </div>
-                        <button 
-                            type="button"
-                            @click="openBatchModal()"
-                            class="sd-alert-btn-batch"
-                            title="Buka modal untuk mencocokkan semua obat sekaligus"
-                        >
-                            <svg style="width: 1.1rem; height: 1.1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
-                            </svg>
-                            <span>Cocokkan Sekaligus ({{ $missingItems }} Obat)</span>
-                        </button>
+                        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <button 
+                                type="button"
+                                wire:click="runAiMatchingForUnmatched"
+                                wire:loading.attr="disabled"
+                                class="sd-alert-btn-batch"
+                                style="background: #7e22ce; color: #ffffff; border-color: #6b21a8;"
+                                title="Jalankan AI untuk mencocokkan otomatis obat yang belum terhubung"
+                            >
+                                <span wire:loading.remove wire:target="runAiMatchingForUnmatched" style="display: flex; align-items: center; gap: 0.35rem;">
+                                    🤖 <span>Cocokkan dengan AI</span>
+                                </span>
+                                <span wire:loading wire:target="runAiMatchingForUnmatched" style="display: flex; align-items: center; gap: 0.35rem;">
+                                    <svg class="animate-spin" style="width: 1rem; height: 1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                    <span>Menganalisis AI...</span>
+                                </span>
+                            </button>
+
+                            <button 
+                                type="button"
+                                @click="openBatchModal()"
+                                class="sd-alert-btn-batch"
+                                title="Buka modal untuk mencocokkan semua obat sekaligus"
+                            >
+                                <svg style="width: 1.1rem; height: 1.1rem;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
+                                </svg>
+                                <span>Cocokkan Sekaligus ({{ $missingItems }} Obat)</span>
+                            </button>
+                        </div>
                     </div>
                     <div class="sd-alert-items">
                         @foreach($unmatchedList as $unmatched)
@@ -1535,6 +1567,8 @@
                                         <span class="sd-match-badge unlisted">📦 Belum Ada di PBF Rekanan</span>
                                     @elseif($mStatus === 'auto_matched')
                                         <span class="sd-match-badge auto" title="Dicocokkan otomatis oleh sistem">⚡ Auto-Matched ({{ round($calc['match_info']['confidence']) }}%)</span>
+                                    @elseif($mStatus === 'ai_matched')
+                                        <span class="sd-match-badge ai" title="{{ $calc['match_info']['reason'] ?? 'Dicocokkan oleh Groq AI' }}">🤖 AI Matched ({{ round($calc['match_info']['confidence']) }}%)</span>
                                     @elseif($mStatus === 'alias')
                                         <span class="sd-match-badge alias" title="Tersimpan di Kamus Alias">Kamus Alias</span>
                                     @endif
