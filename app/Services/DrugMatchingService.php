@@ -27,7 +27,7 @@ class DrugMatchingService
      *     reason: ?string
      * }
      */
-    public function match(string $rawName, bool $useAi = true): array
+    public function match(string $rawName, bool $useAi = false): array
     {
         $cleanRaw = mb_strtolower(trim($rawName));
         $parsed = $this->normalizer->parseDrugName($rawName, '');
@@ -149,6 +149,31 @@ class DrugMatchingService
 
         $candidates = $this->findCandidatePool($reqTokens, $reqStrength);
         if ($candidates->isEmpty()) {
+            if ($useAi && $this->aiService && $this->aiService->isAvailable()) {
+                $eval = $this->aiService->evaluateUnmatchedProduct($rawName);
+                if ($eval && ($eval['confidence'] ?? 0) >= 80.0) {
+                    $status = $eval['decision'] === 'not_stocked' ? 'not_stocked' : 'unlisted';
+                    ProductAlias::firstOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $cleanRaw,
+                            'status' => $status,
+                            'normalized_product_id' => null,
+                        ]
+                    );
+
+                    return [
+                        'status' => $status,
+                        'product' => null,
+                        'confidence' => $eval['confidence'],
+                        'total_candidates' => 0,
+                        'matched_name' => $status === 'not_stocked' ? 'Bukan Stok PBF (Belanja Mandiri)' : 'Belum Ada di PBF Rekanan',
+                        'suggestions' => [],
+                        'reason' => 'Identifikasi AI: '.($eval['reason'] ?? ''),
+                    ];
+                }
+            }
+
             return [
                 'status' => 'unmatched',
                 'product' => null,
@@ -174,7 +199,7 @@ class DrugMatchingService
         }
 
         if (empty($scoredCandidates)) {
-            // Jika fuzzy score tidak mencapai 70% (misal singkatan/nama komersial), coba tanyakan ke AI jika ada kandidat dasar
+            // Jika fuzzy score tidak mencapai 70% (misal singkatan/nama komersial), tanyakan ke AI dengan 4 pertimbangan ketat
             if ($useAi && $this->aiService && $this->aiService->isAvailable() && $candidates->isNotEmpty()) {
                 $aiResult = $this->aiService->matchDrug($rawName, $candidates->take(8));
                 if ($aiResult && ! empty($aiResult['matched_id']) && ($aiResult['confidence'] ?? 0) >= 80.0) {
@@ -199,6 +224,25 @@ class DrugMatchingService
                             'reason' => 'Cocok via AI: '.($aiResult['reason'] ?? ''),
                         ];
                     }
+                } elseif ($aiResult && ($aiResult['decision'] ?? '') === 'not_stocked' && ($aiResult['confidence'] ?? 0) >= 80.0) {
+                    ProductAlias::firstOrCreate(
+                        ['alias_normalized' => $canonical],
+                        [
+                            'alias_raw' => $cleanRaw,
+                            'status' => 'not_stocked',
+                            'normalized_product_id' => null,
+                        ]
+                    );
+
+                    return [
+                        'status' => 'not_stocked',
+                        'product' => null,
+                        'confidence' => $aiResult['confidence'],
+                        'total_candidates' => 0,
+                        'matched_name' => 'Bukan Stok PBF (Belanja Mandiri)',
+                        'suggestions' => [],
+                        'reason' => 'AI: '.($aiResult['reason'] ?? ''),
+                    ];
                 }
             }
 
@@ -275,6 +319,25 @@ class DrugMatchingService
                         'reason' => 'Cocok via AI: '.($aiResult['reason'] ?? ''),
                     ];
                 }
+            } elseif ($aiResult && ($aiResult['decision'] ?? '') === 'not_stocked' && ($aiResult['confidence'] ?? 0) >= 80.0) {
+                ProductAlias::firstOrCreate(
+                    ['alias_normalized' => $canonical],
+                    [
+                        'alias_raw' => $cleanRaw,
+                        'status' => 'not_stocked',
+                        'normalized_product_id' => null,
+                    ]
+                );
+
+                return [
+                    'status' => 'not_stocked',
+                    'product' => null,
+                    'confidence' => $aiResult['confidence'],
+                    'total_candidates' => 0,
+                    'matched_name' => 'Bukan Stok PBF (Belanja Mandiri)',
+                    'suggestions' => [],
+                    'reason' => 'AI: '.($aiResult['reason'] ?? ''),
+                ];
             }
         }
 
@@ -310,42 +373,44 @@ class DrugMatchingService
             });
         }
 
-        $firstToken = $reqTokens[0] ?? '';
-        $prefix = mb_substr($firstToken, 0, 4);
+        $candidates = collect();
 
-        // 1. Prefix match pada nama utama (misal: 'ARKA%' untuk Arkavit)
-        if (mb_strlen($prefix) >= 3) {
-            $narrowed = (clone $query)->where('parsed_name', 'like', $prefix.'%')->get();
-            if ($narrowed->isNotEmpty()) {
-                return $narrowed;
-            }
-        }
-
-        // 2. Token utama utuh jika letaknya di tengah kata
-        if (mb_strlen($firstToken) >= 3) {
-            $byToken = (clone $query)->where('parsed_name', 'like', '%'.$firstToken.'%')->get();
-            if ($byToken->isNotEmpty()) {
-                return $byToken;
-            }
-        }
-
-        // 3. Cari kata signifikan lainnya (panjang >= 4, bukan sediaan umum)
+        // 1. Ekstrak token nama obat yang signifikan
         $sigTokens = array_values(array_filter($reqTokens, fn ($t) => $this->isSignificantToken($t)));
+        if (empty($sigTokens)) {
+            $sigTokens = $reqTokens;
+        }
 
-        if (! empty($sigTokens)) {
-            $tokenQuery = clone $query;
-            $tokenQuery->where(function ($q) use ($sigTokens) {
-                foreach ($sigTokens as $tok) {
-                    $q->orWhere('parsed_name', 'like', '%'.$tok.'%');
+        // 2. Pencarian Substring Langsung untuk token utama (misal: '%ALERZIN%' cocok ke HUFALERZINE)
+        $primary = $sigTokens[0] ?? '';
+        if (mb_strlen($primary) >= 3) {
+            $bySubstring = (clone $query)
+                ->where(function ($q) use ($primary) {
+                    $q->where('parsed_name', 'like', '%'.$primary.'%')
+                        ->orWhere('normalized_name', 'like', '%'.$primary.'%');
+                })
+                ->limit(50)
+                ->get();
+            $candidates = $candidates->merge($bySubstring);
+        }
+
+        // 3. Pecah kata gabungan (contoh: TERMOREXPLUS -> TERMOREX + PLUS)
+        if (mb_strlen($primary) >= 7) {
+            $stems = preg_split('/(PLUS|FORTE|EXTRA|DROP|SYR|TAB|KAP)/i', $primary, -1, PREG_SPLIT_NO_EMPTY);
+            if (is_array($stems)) {
+                foreach ($stems as $stem) {
+                    if (mb_strlen($stem) >= 4 && $stem !== $primary) {
+                        $stemMatches = (clone $query)
+                            ->where('parsed_name', 'like', '%'.$stem.'%')
+                            ->limit(30)
+                            ->get();
+                        $candidates = $candidates->merge($stemMatches);
+                    }
                 }
-            });
-            $res = $tokenQuery->limit(200)->get();
-            if ($res->isNotEmpty()) {
-                return $res;
             }
         }
 
-        // 4. Ekspansi singkatan umum farmasi Indonesia jika token awal cocok
+        // 4. Ekspansi singkatan umum farmasi Indonesia jika token cocok
         $abbreviations = [
             'PCT' => 'PARACETAMOL',
             'PARACET' => 'PARACETAMOL',
@@ -368,14 +433,31 @@ class DrugMatchingService
             if (isset($abbreviations[$tok])) {
                 $expanded = $abbreviations[$tok];
                 $expandedMatches = (clone $query)->where('parsed_name', 'like', '%'.$expanded.'%')->limit(50)->get();
-                if ($expandedMatches->isNotEmpty()) {
-                    return $expandedMatches;
-                }
+                $candidates = $candidates->merge($expandedMatches);
             }
         }
 
-        // Kembalikan empty jika tidak ada token nama yang cocok (mencegah salah cocok dengan obat acak)
-        return collect();
+        // 5. Pencarian token signifikan lainnya jika kandidat masih sedikit
+        if ($candidates->count() < 10 && count($sigTokens) > 1) {
+            $otherTokens = array_slice($sigTokens, 1);
+            $tokenQuery = clone $query;
+            $tokenQuery->where(function ($q) use ($otherTokens) {
+                foreach ($otherTokens as $tok) {
+                    $q->orWhere('parsed_name', 'like', '%'.$tok.'%');
+                }
+            });
+            $res = $tokenQuery->limit(50)->get();
+            $candidates = $candidates->merge($res);
+        }
+
+        // 6. Fallback prefix match jika masih kosong
+        if ($candidates->isEmpty() && mb_strlen($primary) >= 4) {
+            $prefix = mb_substr($primary, 0, 4);
+            $prefixMatches = (clone $query)->where('parsed_name', 'like', $prefix.'%')->limit(30)->get();
+            $candidates = $candidates->merge($prefixMatches);
+        }
+
+        return $candidates->unique('id')->values();
     }
 
     /**
@@ -594,6 +676,13 @@ class DrugMatchingService
             // Cocok persis
             if ($primaryReq === $candTok) {
                 return true;
+            }
+
+            // Substring containment (misal ALERZIN di HUFALERZINE, atau TERMOREX di TERMOREXPLUS)
+            if (mb_strlen($primaryReq) >= 5 && mb_strlen($candTok) >= 5) {
+                if (str_contains($candTok, $primaryReq) || str_contains($primaryReq, $candTok)) {
+                    return true;
+                }
             }
 
             // Typo minor (jarak edit <= 1 untuk kata dengan panjang >= 5 huruf)

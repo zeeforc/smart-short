@@ -652,6 +652,8 @@ class SmartDefecta extends Page implements HasTable
         $matcher = app(DrugMatchingService::class);
         $recalculated = [];
         $aiMatchedCount = 0;
+        $autoMatchedCount = 0;
+        $notStockedCount = 0;
 
         foreach ($this->calculationResults as $idx => $res) {
             $hasWinner = ! empty($res['calculation']['winner']);
@@ -661,25 +663,44 @@ class SmartDefecta extends Page implements HasTable
                 $rawName = $res['request']['product_name'];
                 $match = $matcher->match($rawName, true);
 
-                if (($match['status'] ?? '') === 'ai_matched' && ! empty($match['product'])) {
+                $matchStatus = $match['status'] ?? '';
+                if ($matchStatus === 'ai_matched' && ! empty($match['product'])) {
                     $recalculated[] = $rawName;
                     $aiMatchedCount++;
+                } elseif ($matchStatus === 'auto_matched' && ! empty($match['product'])) {
+                    $recalculated[] = $rawName;
+                    $autoMatchedCount++;
+                } elseif ($matchStatus === 'not_stocked') {
+                    $recalculated[] = $rawName;
+                    $notStockedCount++;
                 }
             }
         }
 
-        if ($aiMatchedCount > 0) {
+        $totalProcessed = $aiMatchedCount + $autoMatchedCount + $notStockedCount;
+        if ($totalProcessed > 0) {
             $this->recalculateMultipleItems($recalculated);
 
+            $messages = [];
+            if ($aiMatchedCount > 0) {
+                $messages[] = "{$aiMatchedCount} cocok via AI";
+            }
+            if ($autoMatchedCount > 0) {
+                $messages[] = "{$autoMatchedCount} cocok otomatis katalog";
+            }
+            if ($notStockedCount > 0) {
+                $messages[] = "{$notStockedCount} ditandai Bukan Stok PBF (Alkes/Non-PBF)";
+            }
+
             Notification::make()
-                ->title("🤖 AI Berhasil Mencocokkan {$aiMatchedCount} Obat!")
-                ->body('Hasil pencocokan telah disimpan permanen ke Kamus Alias.')
+                ->title("🤖 Berhasil Memproses {$totalProcessed} Obat!")
+                ->body(implode(', ', $messages).'. Hasil disimpan permanen ke Kamus Alias.')
                 ->success()
                 ->send();
         } else {
             Notification::make()
                 ->title('AI belum menemukan kecocokan baru')
-                ->body('Kandidat yang tersedia belum ada yang sesuai dengan standar akurasi AI.')
+                ->body('Kandidat yang tersedia belum ada yang memenuhi 4 kriteria ketat kecocokan.')
                 ->info()
                 ->send();
         }

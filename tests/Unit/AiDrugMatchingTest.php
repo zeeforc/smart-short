@@ -154,7 +154,7 @@ class AiDrugMatchingTest extends TestCase
             ], 200),
         ]);
 
-        $res = $this->matcher->match('PCT 500');
+        $res = $this->matcher->match('PCT 500', true);
 
         $this->assertSame('ai_matched', $res['status']);
         $this->assertSame($paracetamol->id, $res['product']->id);
@@ -165,6 +165,73 @@ class AiDrugMatchingTest extends TestCase
         $this->assertDatabaseHas('product_aliases', [
             'normalized_product_id' => $paracetamol->id,
             'target_canonical' => $paracetamol->normalized_name,
+        ]);
+    }
+
+    public function test_matches_substring_brand_such_as_alerzin_to_hufalerzine(): void
+    {
+        $hufalerzine = NormalizedProduct::create([
+            'normalized_name' => 'HUFALERZINE|60ML|SYR',
+            'parsed_name' => 'HUFALERZINE',
+            'parsed_strength' => '60ML',
+            'parsed_form' => 'SYR',
+            'lowest_price' => 5500,
+        ]);
+
+        Http::fake([
+            'https://api.groq.com/openai/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'decision' => 'matched',
+                                'matched_id' => $hufalerzine->id,
+                                'confidence' => 95.0,
+                                'reason' => 'Alerzin sirup 60ml adalah sediaan Cetirizine yang diproduksi oleh Hufa dengan nama dagang Hufalerzine sirup 60ml',
+                            ]),
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $res = $this->matcher->match('ALERZIN SYR 60 ML', true);
+
+        // AI berhasil mencocokkan brand pabrikan yang memiliki substring nama sama
+        $this->assertNotNull($res['product']);
+        $this->assertSame($hufalerzine->id, $res['product']->id);
+        $this->assertSame('ai_matched', $res['status']);
+        $this->assertSame(95.0, $res['confidence']);
+    }
+
+    public function test_automatically_marks_medical_consumable_as_not_stocked_when_unmatched(): void
+    {
+        Http::fake([
+            'https://api.groq.com/openai/v1/chat/completions' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'decision' => 'not_stocked',
+                                'confidence' => 95.0,
+                                'reason' => 'Celana Khitan adalah alat kesehatan non-obat yang dibeli mandiri',
+                            ]),
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $res = $this->matcher->match('CELANA KHITAN UK.S ONEMED', true);
+
+        $this->assertSame('not_stocked', $res['status']);
+        $this->assertNull($res['product']);
+        $this->assertSame(95.0, $res['confidence']);
+        $this->assertStringContainsString('Bukan Stok PBF', $res['matched_name']);
+
+        $this->assertDatabaseHas('product_aliases', [
+            'status' => 'not_stocked',
+            'normalized_product_id' => null,
         ]);
     }
 }

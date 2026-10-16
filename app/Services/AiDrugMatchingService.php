@@ -29,11 +29,13 @@ class AiDrugMatchingService
     }
 
     /**
-     * Mencocokkan 1 nama obat defecta dengan daftar kandidat produk dari master pricelist.
+     * Mencocokkan 1 nama obat defecta dengan daftar kandidat produk dari master pricelist
+     * menggunakan 4 pertimbangan ketat farmasi.
      *
      * @param  string  $rawName  Nama obat mentah dari defecta (contoh: "AMOX 500", "PCT SYR")
      * @param  Collection<int, NormalizedProduct>|array<int, mixed>  $candidates  Daftar kandidat produk dari database
      * @return array{
+     *     decision: string,
      *     matched_id: ?int,
      *     confidence: float,
      *     reason: string,
@@ -48,7 +50,7 @@ class AiDrugMatchingService
 
         $candidateList = $this->formatCandidates($candidates);
         if (empty($candidateList)) {
-            return null;
+            return $this->evaluateUnmatchedProduct($rawName);
         }
 
         $prompt = $this->buildSingleMatchPrompt($rawName, $candidateList);
@@ -62,7 +64,7 @@ class AiDrugMatchingService
                 'messages' => [
                     [
                         'role' => 'system',
-                        'content' => 'Kamu adalah asisten apoteker ahli inventaris obat apotek di Indonesia. Tugasmu adalah mencocokkan nama obat dari daftar pesanan (defecta) dengan produk yang tepat di katalog pricelist distributor PBF. Keluarkan jawaban HANYA berupa objek JSON valid.',
+                        'content' => 'Kamu adalah asisten apoteker senior dan ahli inventaris obat apotek di Indonesia. Tugasmu adalah mencocokkan nama obat dari defecta pesanan dengan produk katalog distributor PBF dengan 4 pertimbangan ketat: 1) Sediaan wajib sejenis (Tablet vs Sirup vs Salep vs Injeksi dilarang silang), 2) Dosis & volume harus kompatibel, 3) Memahami singkatan dagang dan awalan/akhiran pabrik farmasi Indonesia, 4) Jangan memaksakan mencocokkan jika produk memang bukan stok PBF/tidak ada. Kembalikan HANYA format JSON valid.',
                     ],
                     [
                         'role' => 'user',
@@ -71,7 +73,7 @@ class AiDrugMatchingService
                 ],
                 'response_format' => ['type' => 'json_object'],
                 'temperature' => 0.1,
-                'max_tokens' => 300,
+                'max_tokens' => 400,
             ]);
 
             if (! $response->successful()) {
@@ -92,6 +94,7 @@ class AiDrugMatchingService
                 return null;
             }
 
+            $decision = (string) ($parsed['decision'] ?? 'ambiguous');
             $matchedId = isset($parsed['matched_id']) && is_numeric($parsed['matched_id'])
                 ? (int) $parsed['matched_id']
                 : null;
@@ -117,7 +120,14 @@ class AiDrugMatchingService
                 }
             }
 
+            if ($matchedProduct) {
+                $decision = 'matched';
+            } elseif ($decision === 'matched') {
+                $decision = 'ambiguous';
+            }
+
             return [
+                'decision' => $decision,
                 'matched_id' => $matchedProduct ? $matchedProduct->id : null,
                 'confidence' => $confidence,
                 'reason' => $reason,
@@ -125,6 +135,94 @@ class AiDrugMatchingService
             ];
         } catch (\Throwable $e) {
             Log::error('AiDrugMatchingService error: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Evaluasi obat yang tidak memiliki kandidat sama sekali di database.
+     * AI mendeteksi apakah obat ini termasuk alat kesehatan, perlengkapan medis, atau produk non-PBF.
+     *
+     * @return array{
+     *     decision: string,
+     *     matched_id: ?int,
+     *     confidence: float,
+     *     reason: string,
+     *     product: null
+     * }|null
+     */
+    public function evaluateUnmatchedProduct(string $rawName): ?array
+    {
+        if (! $this->isAvailable()) {
+            return null;
+        }
+
+        $prompt = <<<PROMPT
+Analisis nama barang berikut yang berasal dari pesanan apotek: "{$rawName}"
+Barang ini tidak ditemukan kandidatnya sama sekali di katalog pricelist distributor obat PBF.
+
+Tentukan apakah barang ini:
+1. "not_stocked" (Alat kesehatan, perlengkapan medis seperti celana khitan/kasa/spuit/arm sling/handscoon, produk consumer goods/kebersihan seperti pantyliner/pembalut, atau suplemen non-PBF yang biasa dibeli mandiri).
+2. "unlisted" (Obat farmasi resmi tetapi distributor rekanan apotek saat ini memang belum menyediakan stoknya).
+
+Kembalikan HANYA format JSON valid berikut:
+{
+  "decision": "not_stocked" atau "unlisted",
+  "confidence": <angka_80_sampai_100>,
+  "reason": "<penjelasan singkat kategori barang>"
+}
+PROMPT;
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer '.$this->apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout($this->timeout)->post('https://api.groq.com/openai/v1/chat/completions', [
+                'model' => $this->model,
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'Kamu adalah asisten apoteker ahli pengadaan apotek. Kategorikan produk yang tidak ada di pricelist distributor PBF menjadi not_stocked (alkes/non-obat) atau unlisted (obat belum ada rekanan). Kembalikan HANYA format JSON valid.',
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $prompt,
+                    ],
+                ],
+                'response_format' => ['type' => 'json_object'],
+                'temperature' => 0.1,
+                'max_tokens' => 200,
+            ]);
+
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $json = $response->json();
+            $content = $json['choices'][0]['message']['content'] ?? null;
+            if (! $content) {
+                return null;
+            }
+
+            $parsed = json_decode($content, true);
+            if (! is_array($parsed)) {
+                return null;
+            }
+
+            $decision = ($parsed['decision'] ?? '') === 'not_stocked' ? 'not_stocked' : 'unlisted';
+            $confidence = isset($parsed['confidence']) ? (float) $parsed['confidence'] : 90.0;
+            $reason = (string) ($parsed['reason'] ?? 'Produk terdeteksi bukan stok PBF');
+
+            return [
+                'decision' => $decision,
+                'matched_id' => null,
+                'confidence' => $confidence,
+                'reason' => $reason,
+                'product' => null,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('AiDrugMatchingService evaluateUnmatched error: '.$e->getMessage());
 
             return null;
         }
@@ -165,7 +263,7 @@ class AiDrugMatchingService
     }
 
     /**
-     * Membangun prompt kecocokan obat.
+     * Membangun prompt kecocokan obat dengan 4 pertimbangan ketat.
      *
      * @param  array<int, array{id: int, text: string}>  $candidateList
      */
@@ -184,17 +282,29 @@ Nama Obat Defecta: "{$rawName}"
 Daftar Kandidat PBF:
 {$candidatesText}
 
-Aturan Penilaian:
-1. Pahami singkatan lazim farmasi Indonesia (misal: PCT = Paracetamol, GG = Gliseril Guaiakolat, CTM = Chlorpheniramine, Amox = Amoxicillin, Asmef = Asam Mefenamat, dll).
-2. Kekuatan dosis dan sediaan WAJIB kompatibel (jangan mencocokkan Tablet ke Salep/Sirup, atau 500mg ke 250mg kecuali memang tidak ada perbedaan signifikan).
-3. Jika ada kandidat yang memang benar-benar obat yang dimaksud, berikan matched_id dengan confidence (80.0 - 100.0) dan alasan singkat.
-4. Jika semua kandidat berbeda zat aktif atau bentuk sediaan sama sekali tidak cocok, isi matched_id dengan null dan confidence 0.
+4 PERTIMBANGAN KETAT (WAJIB DIPATUHI):
+1. BENTUK SEDIAAN (DOSAGE FORM) WAJIB KOMPATIBEL:
+   - Tablet/Kaplet/Kapsul HANYA boleh cocok dengan sediaan padat oral (Tab/Kap/Kaps).
+   - Sirup/Suspensi/Dry Syrup HANYA boleh cocok dengan sediaan cair oral (Syr/Susp/Drop oral).
+   - Salep/Krim/Gel HANYA boleh cocok dengan sediaan topikal.
+   - Tetes/Salep Mata HANYA boleh dengan Mata. Tetes Telinga HANYA boleh dengan Telinga. Injeksi HANYA boleh dengan Injeksi.
+   - DILARANG KERAS mencocokkan Tablet ke Sirup/Salep/Injeksi ataupun sebaliknya!
+2. KEKUATAN DOSIS & VOLUME:
+   - Dosis zat aktif (500mg, 250mg, 10mg, dll) WAJIB sesuai. Jangan memasangkan 500mg dengan 250mg.
+   - Volume (60ml, 100ml, 15g, 5g) harus sesuai atau setara.
+3. NAMA DAGANG & PBF INDONESIA:
+   - Pahami awalan pabrik PBF (contoh: Alerzin = Hufalerzine [pabrik Hufa], Novamox = Amoxicillin [pabrik Nova], Yusimox = Amoxicillin [pabrik Ifars]).
+   - Abaikan kode kemasan PBF seperti NORET, NORETUR, 'IFR', 'HUF', 'MET', 'DEX', '/60', '/80', dll.
+   - Pahami singkatan umum (PCT = Paracetamol, GG = Guaifenesin, CTM = Chlorpheniramine, Asmef = Asam Mefenamat, dll).
+4. JIKA TIDAK ADA YANG COCOK / BUKAN STOK PBF:
+   - Jika semua kandidat memiliki zat aktif atau bentuk sediaan yang tidak cocok, ISI matched_id dengan null dan decision dengan "not_stocked" (jika produk alkes/non-obat) atau "unlisted" (jika obat belum ada di distributor). JANGAN ASAL PILIH!
 
-Kembalikan HANYA format JSON valid berikut tanpa markdown:
+Kembalikan HANYA format JSON valid berikut:
 {
+  "decision": "matched" | "not_stocked" | "unlisted" | "ambiguous",
   "matched_id": <id_produk_atau_null>,
   "confidence": <angka_0_sampai_100>,
-  "reason": "<alasan ringkas kenapa cocok atau kenapa ditolak>"
+  "reason": "<penjelasan pertimbangan: zat aktif, sediaan, dosis/volume>"
 }
 PROMPT;
     }
