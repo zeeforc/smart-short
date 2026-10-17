@@ -3,9 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Models\NormalizedProduct;
+use App\Models\ProductAlias;
 use App\Models\RawProduct;
 use App\Services\ProductNormalizationService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Schema;
 
 class ReprocessNormalization extends Command
 {
@@ -18,7 +20,10 @@ class ReprocessNormalization extends Command
     public function handle(ProductNormalizationService $service): int
     {
         if ($this->option('fresh')) {
+            Schema::disableForeignKeyConstraints();
+            ProductAlias::whereNotNull('normalized_product_id')->update(['normalized_product_id' => null]);
             NormalizedProduct::truncate();
+            Schema::enableForeignKeyConstraints();
             $this->info('Cleared normalized_products table.');
         }
 
