@@ -39,6 +39,11 @@ class ProductNormalizationService
         // Hapus simbol bullet / minus di awal seperti "- CENDO", "* PARACETAMOL"
         $s = preg_replace('/^[-\*\•\.\s]+/', '', $s);
 
+        // Hapus nomor urut baris di awal akibat konversi dokumen PDF/Excel
+        // Contoh: "1465 nebacetine", "1507noroid", "1. acarbose", "1054) paracetamol"
+        $s = preg_replace('/^\d{1,5}[\.\)\-\s]+\s*/', '', $s);
+        $s = preg_replace('/^\d{2,5}(?=[a-z])/', '', $s);
+
         // Standarisasi angka desimal koma ke titik (12,5 -> 12.5)
         $s = preg_replace('/(\d+),(\d+)/', '$1.$2', $s);
 

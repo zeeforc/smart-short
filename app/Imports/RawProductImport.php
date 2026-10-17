@@ -61,6 +61,14 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         $price = $this->findValue($row, $priceKw);
         $discount = $this->findValue($row, $discKw);
 
+        $name = trim(strval($name));
+
+        // Bersihkan nomor urut baris di awal yang terbawa dari PDF/Excel
+        // Contoh: "1465 NEBACETINE", "1507NOROID", "1. ACARBOSE", "1054) PARACETAMOL"
+        $name = preg_replace('/^\d{1,5}[\.\)\-\s]+\s*/', '', $name);
+        $name = preg_replace('/^\d{2,5}(?=[a-zA-Z])/', '', $name);
+        $name = trim(preg_replace('/\s+/', ' ', $name));
+
         $cleanedPrice = $this->cleanNumber($price);
         $lowerName = strtolower(trim(strval($name)));
 
@@ -80,7 +88,18 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         }
 
         // Hitung diskon yang tertulis di Excel (per baris)
-        $rowDiscount = $this->cleanNumber($discount ?? 0);
+        $rawDiscountStr = trim(strval($discount ?? ''));
+        $rowDiscount = 0.0;
+        if (! empty($rawDiscountStr)) {
+            $parsedDisc = $this->cleanNumber($rawDiscountStr);
+            if (str_contains($rawDiscountStr, '%') || ($parsedDisc > 0 && $parsedDisc <= 100 && $cleanedPrice > 1000)) {
+                // Diskon berupa persentase (e.g. "10%" atau angka 10 pada obat berharga > Rp 1.000)
+                $rowDiscount = $cleanedPrice * ($parsedDisc / 100.0);
+            } else {
+                // Diskon nominal rupiah
+                $rowDiscount = $parsedDisc;
+            }
+        }
 
         // Hitung diskon global jika diinput oleh user
         $calculatedGlobalDiscount = 0;
