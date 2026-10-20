@@ -26,35 +26,47 @@ class RepairDiscountData extends Command
             return self::FAILURE;
         }
 
-        // Step 1: Fix raw_products where discount > 0 but discount_pct is 0
-        // These are old records where price was already reduced by discount nominal.
-        // We reverse-calculate the original HNA and fill discount_pct.
+        // Step 1: Fix raw_products where discount > 0
+        // Di file pricelist supplier (seperti LJS, SRI BUANA, dll.), kolom diskon berisi angka persentase (e.g. 3, 8, 15%).
+        // Pada import versi lama, angka persentase ini keliru disimpan ke kolom 'discount' dan langsung dikurangi
+        // dari harga (misal Rp 13.000 dikurangi 8 perak jadi Rp 12.992).
+        // Kita pulihkan harga HNA asli dan isi kolom 'discount_pct' dengan persentase yang benar.
         $repairedCount = 0;
         RawProduct::where('discount', '>', 0)
-            ->where(function ($q) {
-                $q->where('discount_pct', 0)->orWhereNull('discount_pct');
-            })
             ->chunkById(200, function ($products) use (&$repairedCount) {
                 foreach ($products as $raw) {
                     $currentPrice = (float) $raw->price;
-                    $discountNominal = (float) $raw->discount;
+                    $discountVal = (float) $raw->discount;
 
-                    // Reverse: original HNA = current_price + discount_nominal
-                    $originalHna = $currentPrice + $discountNominal;
-
-                    if ($originalHna <= 0) {
+                    if ($discountVal <= 0) {
                         continue;
                     }
 
-                    // Calculate percentage
-                    $discountPct = round(($discountNominal / $originalHna) * 100, 4);
+                    // Tentukan persentase diskon yang benar: angka <= 100 adalah persentase (e.g. 8 untuk 8%)
+                    $discountPct = $discountVal <= 100
+                        ? $discountVal
+                        : round(($discountVal / ($currentPrice + $discountVal)) * 100, 4);
 
-                    $raw->update([
-                        'price' => $originalHna,
-                        'discount_pct' => $discountPct,
-                    ]);
+                    $currentDiscPct = (float) ($raw->discount_pct ?? 0);
 
-                    $repairedCount++;
+                    // Kasus 1: Belum pernah diperbaiki (discount_pct masih 0/null)
+                    // Pulihkan harga HNA asli (+ discountVal) dan simpan discount_pct yang benar
+                    if ($currentDiscPct == 0) {
+                        $originalHna = $currentPrice + $discountVal;
+                        $raw->update([
+                            'price' => $originalHna,
+                            'discount_pct' => $discountPct,
+                        ]);
+                        $repairedCount++;
+                    }
+                    // Kasus 2: Pernah diperbaiki tapi dengan formula lama yang salah (menghasilkan angka kerdil seperti 0.06% atau 0.09%)
+                    // Harganya sudah HNA asli, cukup perbaiki discount_pct-nya
+                    elseif ($currentDiscPct < 1 && $discountVal >= 1) {
+                        $raw->update([
+                            'discount_pct' => $discountPct,
+                        ]);
+                        $repairedCount++;
+                    }
                 }
             });
 

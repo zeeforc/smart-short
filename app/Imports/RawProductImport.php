@@ -93,11 +93,11 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         $rowDiscountPct = 0.0;
         if (! empty($rawDiscountStr)) {
             $parsedDisc = $this->cleanNumber($rawDiscountStr);
-            if (str_contains($rawDiscountStr, '%') || ($parsedDisc > 0 && $parsedDisc <= 100 && $cleanedPrice > 1000)) {
-                // Diskon berupa persentase (e.g. "10%" atau angka 10 pada obat berharga > Rp 1.000)
+            if (str_contains($rawDiscountStr, '%') || ($parsedDisc > 0 && $parsedDisc <= 100)) {
+                // Diskon berupa persentase (e.g. "10%" atau angka 10 pada kolom diskon)
                 $rowDiscountPct = $parsedDisc;
             } else {
-                // Diskon nominal rupiah — konversi ke persen agar tersimpan
+                // Diskon nominal rupiah (> 100) — konversi ke persen agar tersimpan
                 $rowDiscountPct = $cleanedPrice > 0 ? round(($parsedDisc / $cleanedPrice) * 100, 4) : 0;
             }
         }
