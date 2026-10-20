@@ -212,10 +212,24 @@ class OrderCalculationService
                 $candQuery->whereNull('parsed_strength');
             }
 
-            $candidates = $candQuery->limit(50)->get();
+            $candidates = $candQuery->limit(200)->get();
+
+            // Cek apakah order mentah meminta brand/pabrikan tertentu
+            $orderBrand = null;
+            $allowGenericCrossBrand = true;
+            if ($rawProductName) {
+                $brandKeywords = ['HJ', 'HEXPHARM', 'SHAMPARINDO', 'SAMPHAR', 'IFI', 'IFARS', 'NOVA', 'NOVAPHARIN', 'MERSI', 'DEXA', 'BERNO', 'TRIMAN', 'SELES', 'BETA', 'NOVEL', 'PIM', 'PHAPROS'];
+                foreach ($brandKeywords as $bKw) {
+                    if (preg_match('/\b'.preg_quote($bKw, '/').'\b/i', $rawProductName)) {
+                        $orderBrand = $bKw;
+                        $allowGenericCrossBrand = false;
+                        break;
+                    }
+                }
+            }
 
             foreach ($candidates as $candidate) {
-                if ($matcher->areEquivalent($matchedProduct, $candidate)) {
+                if ($matcher->areEquivalent($matchedProduct, $candidate, $orderBrand, $allowGenericCrossBrand)) {
                     $products->push($candidate);
                 }
             }

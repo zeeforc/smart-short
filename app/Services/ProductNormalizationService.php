@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\NormalizedProduct;
+use App\Models\ProductDiscountTier;
 use App\Models\RawProduct;
 use Illuminate\Support\Facades\Log;
 
@@ -85,11 +86,22 @@ class ProductNormalizationService
             'INJEKSI' => 'INJ', 'TETES' => 'DROP', 'DROPS' => 'DROP', 'TTS' => 'DROP',
             'GRAM' => 'GR', 'GM' => 'GR', 'G' => 'GR',
             'METILPREDNISOLON' => 'METHYLPREDNISOLONE',
+            'ACETILSEISTEIN' => 'ACETYLCYSTEINE', 'ACETYLCESTEIN' => 'ACETYLCYSTEINE',
             'ACETYLSISTEIN' => 'ACETYLCYSTEINE', 'ACETYLCYSTEIN' => 'ACETYLCYSTEINE',
+            'AMMOXILINE' => 'AMOXICILLIN',
+            'AMLODIPIN' => 'AMLODIPINE',
+            'SHAMPARINDO' => 'SAMPHARINDO', 'SAMPHAR' => 'SAMPHARINDO',
+            'HJ' => 'HEXPHARM', 'HEXP' => 'HEXPHARM', 'HEX' => 'HEXPHARM',
+            'IFI' => 'IFARS',
+            'NOVA' => 'NOVAPHARIN',
+            'MERSI' => 'MERSIFARMA', 'MERSIFARM' => 'MERSIFARMA',
+            'BETA' => 'BETAPHARM',
+            'NOVEL' => 'NOVELL',
+            'MYK' => 'MINYAK',
         ];
 
         $noise = [
-            'NORET', 'NORETUR', 'NRT', 'NR', 'RETUR', 'NO', 'NEW',
+            'NORET', 'NORETUR', 'NRT', 'N-RT', 'NR', 'RETUR', 'NO', 'NEW', 'PROMO',
             'STRIP', 'BLISTER', 'BOX', 'BOTOL', 'BTL', 'FLS', 'TUBE', 'POT', 'VIAL', 'AMP',
             'E.D', 'ED', 'TM', 'TT',
         ];
@@ -196,6 +208,22 @@ class ProductNormalizationService
                 'lowest_price' => $lowestPrice,
                 'best_supplier_id' => $bestSupplierId,
             ]);
+        }
+
+        // Jika file supplier menyertakan diskon per item, simpan ke ProductDiscountTier
+        // agar OrderCalculationService memperhitungkannya secara otomatis.
+        $discountPct = (float) ($raw->discount_pct ?? 0);
+        if ($discountPct > 0) {
+            ProductDiscountTier::updateOrCreate(
+                [
+                    'supplier_id' => $raw->supplier_id,
+                    'product_name' => $parsed['name'],
+                    'min_qty' => 1,
+                ],
+                [
+                    'discount_pct' => $discountPct,
+                ]
+            );
         }
     }
 }

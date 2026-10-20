@@ -87,17 +87,20 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
             return null;
         }
 
-        // Hitung diskon yang tertulis di Excel (per baris)
+        // Hitung diskon per baris yang tertulis di file supplier
         $rawDiscountStr = trim(strval($discount ?? ''));
-        $rowDiscount = 0.0;
+        $rowDiscountPct = 0.0;  // Simpan persentase asli untuk ProductDiscountTier
+        $rowDiscountNominal = 0.0;
         if (! empty($rawDiscountStr)) {
             $parsedDisc = $this->cleanNumber($rawDiscountStr);
             if (str_contains($rawDiscountStr, '%') || ($parsedDisc > 0 && $parsedDisc <= 100 && $cleanedPrice > 1000)) {
                 // Diskon berupa persentase (e.g. "10%" atau angka 10 pada obat berharga > Rp 1.000)
-                $rowDiscount = $cleanedPrice * ($parsedDisc / 100.0);
+                $rowDiscountPct = $parsedDisc;
+                $rowDiscountNominal = $cleanedPrice * ($parsedDisc / 100.0);
             } else {
-                // Diskon nominal rupiah
-                $rowDiscount = $parsedDisc;
+                // Diskon nominal rupiah — konversi ke persen untuk disimpan
+                $rowDiscountNominal = $parsedDisc;
+                $rowDiscountPct = $cleanedPrice > 0 ? round(($parsedDisc / $cleanedPrice) * 100, 4) : 0;
             }
         }
 
@@ -106,20 +109,14 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
         if (! empty($this->global_discount)) {
             $gd = strtolower(trim(strval($this->global_discount)));
             if (str_contains($gd, '%')) {
-                // Diskon persentase, e.g., "5%"
                 $percentage = (float) str_replace('%', '', $gd);
                 $calculatedGlobalDiscount = $cleanedPrice * ($percentage / 100);
             } else {
-                // Diskon nominal fix, e.g., "5000"
                 $calculatedGlobalDiscount = (float) preg_replace('/[^\d.,]/', '', $gd);
             }
         }
 
-        // Total diskon yang diberikan (di file + global)
-        $totalDiscount = $rowDiscount + $calculatedGlobalDiscount;
-
-        // Kurangi harga asli dengan total diskon
-        // Pastikan harga akhir tidak jadi minus (minimal 0)
+        $totalDiscount = $rowDiscountNominal + $calculatedGlobalDiscount;
         $finalPrice = max(0, $cleanedPrice - $totalDiscount);
 
         return new RawProduct([
@@ -129,6 +126,7 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
             'raw_unit' => $unit ?? '-',
             'price' => $finalPrice,
             'discount' => $totalDiscount,
+            'discount_pct' => $rowDiscountPct,
         ]);
     }
 

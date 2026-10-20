@@ -541,7 +541,7 @@ class DrugMatchingService
      * Memeriksa apakah dua produk master NormalizedProduct adalah obat yang setara
      * (Zat aktif/brand sama, dosis sama, rute sediaan sama, dan pabrikan sama jika tercantum)
      */
-    public function areEquivalent(NormalizedProduct $p1, NormalizedProduct $p2): bool
+    public function areEquivalent(NormalizedProduct $p1, NormalizedProduct $p2, ?string $requiredBrand = null, bool $allowGenericCrossBrand = false): bool
     {
         // 1. Dosis wajib identik
         $str1 = $p1->parsed_strength ? strtoupper(trim($p1->parsed_strength)) : null;
@@ -581,16 +581,31 @@ class DrugMatchingService
             return false;
         }
 
-        // Jika salah satu produk mencantumkan pabrikan/kualifikasi spesifik (misal NOVA, BALATIF, DEXA, IFARS, SELES),
-        // maka produk lain wajib mengandung kualifikasi yang cocok
+        // Kamus alias pabrikan/kualifikasi
+        $qualifierAliases = [
+            'HJ' => 'HEXPHARM', 'HEXP' => 'HEXPHARM', 'HEX' => 'HEXPHARM', 'HEXPHARM' => 'HEXPHARM',
+            'SHAMPARINDO' => 'SAMPHARINDO', 'SAMPHAR' => 'SAMPHARINDO', 'SAMPHARINDO' => 'SAMPHARINDO',
+            'IFI' => 'IFARS', 'IFARS' => 'IFARS',
+            'NOVA' => 'NOVAPHARIN', 'NOVAPHARIN' => 'NOVAPHARIN',
+            'MERSI' => 'MERSIFARMA', 'MERSIFARM' => 'MERSIFARMA', 'MERSIFARMA' => 'MERSIFARMA',
+            'DEXA' => 'DEXA', 'BERNO' => 'BERNOFARM', 'BERNOFARM' => 'BERNOFARM',
+            'TRIMAN' => 'TRIMAN', 'SELES' => 'SELES',
+            'BETA' => 'BETAPHARM', 'BETAPHARM' => 'BETAPHARM',
+            'NOVEL' => 'NOVELL', 'NOVELL' => 'NOVELL',
+            'PIM' => 'PIM', 'PHAPROS' => 'PHAPROS',
+        ];
+
+        // Jika salah satu produk mencantumkan pabrikan/kualifikasi spesifik, cocokkan
         $qualifiers1 = array_slice($toks1, 1);
         $qualifiers2 = array_slice($toks2, 1);
 
         if (! empty($qualifiers1) && ! empty($qualifiers2)) {
             $hasCommonQualifier = false;
             foreach ($qualifiers1 as $q1) {
+                $normQ1 = $qualifierAliases[$q1] ?? $q1;
                 foreach ($qualifiers2 as $q2) {
-                    if ($q1 === $q2 || str_starts_with($q2, $q1) || str_starts_with($q1, $q2)) {
+                    $normQ2 = $qualifierAliases[$q2] ?? $q2;
+                    if ($normQ1 === $normQ2 || str_starts_with($normQ2, $normQ1) || str_starts_with($normQ1, $normQ2)) {
                         $hasCommonQualifier = true;
                         break 2;
                     }
@@ -598,6 +613,27 @@ class DrugMatchingService
             }
 
             if (! $hasCommonQualifier) {
+                // Jika order generik dan mengizinkan lintas pabrikan, izinkan
+                if ($allowGenericCrossBrand && empty($requiredBrand)) {
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        // Jika ada requiredBrand dari order, pastikan p2 mengandung brand tsb
+        if (! empty($requiredBrand)) {
+            $normReq = $qualifierAliases[strtoupper($requiredBrand)] ?? strtoupper($requiredBrand);
+            $p2HasReq = false;
+            foreach ($toks2 as $t) {
+                $normT = $qualifierAliases[$t] ?? $t;
+                if ($normT === $normReq || str_starts_with($normT, $normReq) || str_starts_with($normReq, $normT)) {
+                    $p2HasReq = true;
+                    break;
+                }
+            }
+            if (! $p2HasReq) {
                 return false;
             }
         }
