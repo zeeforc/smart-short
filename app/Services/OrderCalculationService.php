@@ -68,11 +68,15 @@ class OrderCalculationService
         $supplierOffers = [];
         foreach ($products as $product) {
             $canonicalName = $product->normalized_name;
+            $parsedName = $product->parsed_name;
             foreach ($product->price_history_json ?? [] as $history) {
                 $sId = (int) $history['supplier_id'];
                 $price = (float) $history['price'];
                 if (! isset($supplierOffers[$sId]) || $price < $supplierOffers[$sId]['price']) {
-                    $supplierOffers[$sId] = array_merge($history, ['canonical' => $canonicalName]);
+                    $supplierOffers[$sId] = array_merge($history, [
+                        'canonical' => $canonicalName,
+                        'parsed_name' => $parsedName,
+                    ]);
                 }
             }
         }
@@ -102,9 +106,10 @@ class OrderCalculationService
             }
 
             // Prioritas diskon:
-            // 1. ProductDiscountTier (manual/override dari admin atau upsert dari import)
-            // 2. discount_pct yang tersimpan di price_history_json (dari file supplier)
-            $discountPct = $this->findDiscount($supplierId, $offer['canonical'], $qty);
+            // 1. ProductDiscountTier (via parsed_name atau canonical, exact/fuzzy)
+            // 2. discount_pct dari price_history_json (dari file supplier)
+            $parsedName = $offer['parsed_name'] ?? null;
+            $discountPct = $this->findDiscount($supplierId, $offer['canonical'], $qty, $parsedName);
             if ($discountPct == 0 && isset($offer['discount_pct']) && $offer['discount_pct'] > 0) {
                 $discountPct = (float) $offer['discount_pct'];
             }
@@ -153,11 +158,24 @@ class OrderCalculationService
 
     /**
      * Cari persentase diskon tertinggi yang memenuhi min_qty.
-     * Mendukung exact match dan fuzzy match (prefix kata pertama) untuk product_name.
+     * Mendukung exact match pada parsed_name dan canonical, plus fuzzy fallback.
      */
-    private function findDiscount(int $supplierId, string $productName, int $qty): float
+    private function findDiscount(int $supplierId, string $productName, int $qty, ?string $parsedName = null): float
     {
-        // 1. Exact match terlebih dulu
+        // 1. Exact match pada parsed_name (ProductDiscountTier menyimpan parsed_name)
+        if ($parsedName) {
+            $productDiscount = ProductDiscountTier::where('supplier_id', $supplierId)
+                ->where('product_name', $parsedName)
+                ->where('min_qty', '<=', $qty)
+                ->orderByDesc('discount_pct')
+                ->first();
+
+            if ($productDiscount) {
+                return (float) $productDiscount->discount_pct;
+            }
+        }
+
+        // 2. Exact match pada canonical name (fallback jika parsed_name tidak cocok)
         $productDiscount = ProductDiscountTier::where('supplier_id', $supplierId)
             ->where('product_name', $productName)
             ->where('min_qty', '<=', $qty)
@@ -168,10 +186,9 @@ class OrderCalculationService
             return (float) $productDiscount->discount_pct;
         }
 
-        // 2. Fuzzy: cari tier yang product_name-nya merupakan substring dari canonical product name
-        //    atau canonical product name merupakan substring dari product_name di tier.
-        //    Gunakan prefix 4 karakter pertama sebagai pre-filter untuk performa.
-        $prefix = mb_substr($productName, 0, 4);
+        // 3. Fuzzy: prefix 4 karakter + substring match
+        $searchName = $parsedName ?? $productName;
+        $prefix = mb_substr($searchName, 0, 4);
         $tierCandidates = ProductDiscountTier::where('supplier_id', $supplierId)
             ->where('product_name', 'like', $prefix.'%')
             ->where('min_qty', '<=', $qty)
@@ -180,13 +197,12 @@ class OrderCalculationService
 
         foreach ($tierCandidates as $tier) {
             $tierName = $tier->product_name;
-            // Cocok jika salah satu mengandung yang lain (case-insensitive)
-            if (stripos($productName, $tierName) !== false || stripos($tierName, $productName) !== false) {
+            if (stripos($searchName, $tierName) !== false || stripos($tierName, $searchName) !== false) {
                 return (float) $tier->discount_pct;
             }
         }
 
-        // 3. Cek diskon global supplier (cached per supplier)
+        // 4. Cek diskon global supplier (cached per supplier)
         if (! array_key_exists($supplierId, $this->globalDiscountsCache)) {
             $this->globalDiscountsCache[$supplierId] = SupplierDiscountTier::where('supplier_id', $supplierId)
                 ->orderByDesc('min_qty')
