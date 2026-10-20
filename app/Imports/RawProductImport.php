@@ -87,45 +87,44 @@ class RawProductImport implements ShouldQueue, ToModel, WithBatchInserts, WithCh
             return null;
         }
 
-        // Hitung diskon per baris yang tertulis di file supplier
+        // Parse diskon per baris dari file supplier (disimpan sebagai pct, TIDAK dikurangi dari harga)
+        // Diskon ini akan disimpan ke ProductDiscountTier dan diterapkan oleh OrderCalculationService
         $rawDiscountStr = trim(strval($discount ?? ''));
-        $rowDiscountPct = 0.0;  // Simpan persentase asli untuk ProductDiscountTier
-        $rowDiscountNominal = 0.0;
+        $rowDiscountPct = 0.0;
         if (! empty($rawDiscountStr)) {
             $parsedDisc = $this->cleanNumber($rawDiscountStr);
             if (str_contains($rawDiscountStr, '%') || ($parsedDisc > 0 && $parsedDisc <= 100 && $cleanedPrice > 1000)) {
                 // Diskon berupa persentase (e.g. "10%" atau angka 10 pada obat berharga > Rp 1.000)
                 $rowDiscountPct = $parsedDisc;
-                $rowDiscountNominal = $cleanedPrice * ($parsedDisc / 100.0);
             } else {
-                // Diskon nominal rupiah — konversi ke persen untuk disimpan
-                $rowDiscountNominal = $parsedDisc;
+                // Diskon nominal rupiah — konversi ke persen agar tersimpan
                 $rowDiscountPct = $cleanedPrice > 0 ? round(($parsedDisc / $cleanedPrice) * 100, 4) : 0;
             }
         }
 
-        // Hitung diskon global jika diinput oleh user
-        $calculatedGlobalDiscount = 0;
+        // Harga yang disimpan adalah HNA asli (sebelum diskon per-item).
+        // Diskon per-item diterapkan oleh OrderCalculationService via ProductDiscountTier.
+        // Hanya global_discount dari user (mis. diskon negosiasi batch) yang di-burn ke harga di sini.
+        $priceToStore = $cleanedPrice;
+        $discountNominalStored = 0;
         if (! empty($this->global_discount)) {
             $gd = strtolower(trim(strval($this->global_discount)));
             if (str_contains($gd, '%')) {
                 $percentage = (float) str_replace('%', '', $gd);
-                $calculatedGlobalDiscount = $cleanedPrice * ($percentage / 100);
+                $discountNominalStored = $cleanedPrice * ($percentage / 100);
             } else {
-                $calculatedGlobalDiscount = (float) preg_replace('/[^\d.,]/', '', $gd);
+                $discountNominalStored = (float) preg_replace('/[^\d.,]/', '', $gd);
             }
+            $priceToStore = max(0, $cleanedPrice - $discountNominalStored);
         }
-
-        $totalDiscount = $rowDiscountNominal + $calculatedGlobalDiscount;
-        $finalPrice = max(0, $cleanedPrice - $totalDiscount);
 
         return new RawProduct([
             'upload_file_id' => $this->upload_file_id,
             'supplier_id' => $this->supplier_id,
             'raw_name' => $name,
             'raw_unit' => $unit ?? '-',
-            'price' => $finalPrice,
-            'discount' => $totalDiscount,
+            'price' => $priceToStore,
+            'discount' => $discountNominalStored,
             'discount_pct' => $rowDiscountPct,
         ]);
     }

@@ -145,22 +145,41 @@ class OrderCalculationService
     }
 
     /**
-     * Cari persentase diskon tertinggi yang memenuhi min_qty
+     * Cari persentase diskon tertinggi yang memenuhi min_qty.
+     * Mendukung exact match dan fuzzy match (prefix kata pertama) untuk product_name.
      */
     private function findDiscount(int $supplierId, string $productName, int $qty): float
     {
-        // Cek diskon spesifik obat
+        // 1. Exact match terlebih dulu
         $productDiscount = ProductDiscountTier::where('supplier_id', $supplierId)
-            ->where('product_name', $productName) // Note: ini butuh fuzzy matching kalau product_name di tabel diskon nggak persis sama. Sementara kita pakai exact match.
+            ->where('product_name', $productName)
             ->where('min_qty', '<=', $qty)
-            ->orderByDesc('min_qty')
+            ->orderByDesc('discount_pct')
             ->first();
 
         if ($productDiscount) {
             return (float) $productDiscount->discount_pct;
         }
 
-        // Kalau nggak ada, cek diskon global supplier (cached per supplier)
+        // 2. Fuzzy: cari tier yang product_name-nya merupakan substring dari canonical product name
+        //    atau canonical product name merupakan substring dari product_name di tier.
+        //    Gunakan prefix 4 karakter pertama sebagai pre-filter untuk performa.
+        $prefix = mb_substr($productName, 0, 4);
+        $tierCandidates = ProductDiscountTier::where('supplier_id', $supplierId)
+            ->where('product_name', 'like', $prefix.'%')
+            ->where('min_qty', '<=', $qty)
+            ->orderByDesc('discount_pct')
+            ->get();
+
+        foreach ($tierCandidates as $tier) {
+            $tierName = $tier->product_name;
+            // Cocok jika salah satu mengandung yang lain (case-insensitive)
+            if (stripos($productName, $tierName) !== false || stripos($tierName, $productName) !== false) {
+                return (float) $tier->discount_pct;
+            }
+        }
+
+        // 3. Cek diskon global supplier (cached per supplier)
         if (! array_key_exists($supplierId, $this->globalDiscountsCache)) {
             $this->globalDiscountsCache[$supplierId] = SupplierDiscountTier::where('supplier_id', $supplierId)
                 ->orderByDesc('min_qty')
