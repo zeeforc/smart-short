@@ -171,6 +171,7 @@ class ProductNormalizationService
                         'supplier_id' => $raw->supplier_id,
                         'raw_name' => $raw->raw_name,
                         'price' => $pricePerUnit,
+                        'discount_pct' => (float) ($raw->discount_pct ?? 0),
                         'unit' => $raw->raw_unit,
                     ],
                 ],
@@ -191,6 +192,7 @@ class ProductNormalizationService
                 'supplier_id' => $raw->supplier_id,
                 'raw_name' => $raw->raw_name,
                 'price' => $pricePerUnit,
+                'discount_pct' => (float) ($raw->discount_pct ?? 0),
                 'unit' => $raw->raw_unit,
             ];
 

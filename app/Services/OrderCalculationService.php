@@ -101,11 +101,18 @@ class OrderCalculationService
                 continue;
             }
 
+            // Prioritas diskon:
+            // 1. ProductDiscountTier (manual/override dari admin atau upsert dari import)
+            // 2. discount_pct yang tersimpan di price_history_json (dari file supplier)
             $discountPct = $this->findDiscount($supplierId, $offer['canonical'], $qty);
-            $netPrice = $basePrice * (1 - ($discountPct / 100));
+            if ($discountPct == 0 && isset($offer['discount_pct']) && $offer['discount_pct'] > 0) {
+                $discountPct = (float) $offer['discount_pct'];
+            }
+
+            $netPrice = round($basePrice * (1 - ($discountPct / 100)), 2);
 
             $ppnRate = 0.12;
-            $finalPrice = $supplier->is_ppn_included ? $netPrice : ($netPrice * (1 + $ppnRate));
+            $finalPrice = $supplier->is_ppn_included ? $netPrice : round($netPrice * (1 + $ppnRate), 2);
 
             $result = [
                 'supplier_id' => $supplier->id,
